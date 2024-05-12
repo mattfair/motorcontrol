@@ -1,54 +1,55 @@
 /* USER CODE BEGIN Header */
 /**
-  ******************************************************************************
-  * @file           : main.c
-  * @brief          : Main program body
-  ******************************************************************************
-  * @attention
-  *
-  * <h2><center>&copy; Copyright (c) 2020 STMicroelectronics.
-  * All rights reserved.</center></h2>
-  *
-  * This software component is licensed by ST under BSD 3-Clause license,
-  * the "License"; You may not use this file except in compliance with the
-  * License. You may obtain a copy of the License at:
-  *                        opensource.org/licenses/BSD-3-Clause
-  *
-  ******************************************************************************
-  */
-
+ ******************************************************************************
+ * @file           : main.c
+ * @brief          : Main program body
+ ******************************************************************************
+ * @attention
+ *
+ * <h2><center>&copy; Copyright (c) 2020 STMicroelectronics.
+ * All rights reserved.</center></h2>
+ *
+ * This software component is licensed by ST under BSD 3-Clause license,
+ * the "License"; You may not use this file except in compliance with the
+ * License. You may obtain a copy of the License at:
+ *                        opensource.org/licenses/BSD-3-Clause
+ *
+ ******************************************************************************
+ */
 
 /// high-bandwidth 3-phase motor control for robots
-/// Written by Ben Katz, with much inspiration from Bayley Wang, Nick Kirkby, Shane Colton, David Otten, and others
-/// Hardware documentation can be found at build-its.blogspot.com
+/// Written by Ben Katz, with much inspiration from Bayley Wang, Nick Kirkby,
+/// Shane Colton, David Otten, and others Hardware documentation can be found at
+/// build-its.blogspot.com
 
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+
 #include "adc.h"
 #include "can.h"
+#include "gpio.h"
 #include "spi.h"
 #include "tim.h"
 #include "usart.h"
-#include "gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "structs.h"
 #include <stdio.h>
 #include <string.h>
 
-#include "stm32f4xx_flash.h"
+#include "calibration.h"
+#include "drv8323.h"
 #include "flash_writer.h"
+#include "foc.h"
+#include "fsm.h"
+#include "hw_config.h"
+#include "math_ops.h"
 #include "position_sensor.h"
 #include "preference_writer.h"
-#include "hw_config.h"
+#include "stm32f4xx_flash.h"
+#include "structs.h"
 #include "user_config.h"
-#include "fsm.h"
-#include "drv8323.h"
-#include "foc.h"
-#include "math_ops.h"
-#include "calibration.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -64,7 +65,6 @@
 /* USER CODE BEGIN PM */
 
 #define VERSION_NUM 2.0f
-
 
 /* USER CODE END PM */
 
@@ -102,21 +102,20 @@ uint8_t Serial2RxBuffer[1];
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
+void PrintCANErrorMessages(CAN_HandleTypeDef *hcan);
+void PrintCANStatusRegisters(CAN_HandleTypeDef *hcan);
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
-
-
-
 /* USER CODE END 0 */
 
 /**
-  * @brief  The application entry point.
-  * @retval int
-  */
+ * @brief  The application entry point.
+ * @retval int
+ */
 int main(void)
 {
   /* USER CODE BEGIN 1 */
@@ -125,7 +124,8 @@ int main(void)
 
   /* MCU Configuration--------------------------------------------------------*/
 
-  /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
+  /* Reset of all peripherals, Initializes the Flash interface and the Systick.
+   */
   HAL_Init();
 
   /* USER CODE BEGIN Init */
@@ -156,36 +156,99 @@ int main(void)
   preference_writer_load(prefs);
 
   /* Sanitize configs in case flash is empty*/
-  if(E_ZERO==-1){E_ZERO = 0;}
-  if(M_ZERO==-1){M_ZERO = 0;}
-  if(isnan(I_BW) || I_BW==-1){I_BW = 1000;}
-  if(isnan(I_MAX) || I_MAX ==-1){I_MAX=40;}
-  if(isnan(I_FW_MAX) || I_FW_MAX ==-1){I_FW_MAX=0;}
-  if(CAN_ID==-1){CAN_ID = 1;}
-  if(CAN_MASTER==-1){CAN_MASTER = 0;}
-  if(CAN_TIMEOUT==-1){CAN_TIMEOUT = 1000;}
-  if(isnan(R_NOMINAL) || R_NOMINAL==-1){R_NOMINAL = 0.0f;}
-  if(isnan(TEMP_MAX) || TEMP_MAX==-1){TEMP_MAX = 125.0f;}
-  if(isnan(I_MAX_CONT) || I_MAX_CONT==-1){I_MAX_CONT = 14.0f;}
-  if(isnan(I_CAL)||I_CAL==-1){I_CAL = 5.0f;}
-  if(isnan(PPAIRS) || PPAIRS==-1){PPAIRS = 21.0f;}
-  if(isnan(GR) || GR==-1){GR = 1.0f;}
-  if(isnan(KT) || KT==-1){KT = 1.0f;}
-  if(isnan(KP_MAX) || KP_MAX==-1){KP_MAX = 500.0f;}
-  if(isnan(KD_MAX) || KD_MAX==-1){KD_MAX = 5.0f;}
-  if(isnan(P_MAX)){P_MAX = 12.5f;}
-  if(isnan(P_MIN)){P_MIN = -12.5f;}
-  if(isnan(V_MAX)){V_MAX = 65.0f;}
-  if(isnan(V_MIN)){V_MIN = -65.0f;}
+  if (E_ZERO == -1)
+  {
+    E_ZERO = 0;
+  }
+  if (M_ZERO == -1)
+  {
+    M_ZERO = 0;
+  }
+  if (isnan(I_BW) || I_BW == -1)
+  {
+    I_BW = 1000;
+  }
+  if (isnan(I_MAX) || I_MAX == -1)
+  {
+    I_MAX = 40;
+  }
+  if (isnan(I_FW_MAX) || I_FW_MAX == -1)
+  {
+    I_FW_MAX = 0;
+  }
+  if (CAN_ID == -1)
+  {
+    CAN_ID = 1;
+  }
+  if (CAN_MASTER == -1)
+  {
+    CAN_MASTER = 0;
+  }
+  if (CAN_TIMEOUT == -1)
+  {
+    CAN_TIMEOUT = 1000;
+  }
+  if (isnan(R_NOMINAL) || R_NOMINAL == -1)
+  {
+    R_NOMINAL = 0.0f;
+  }
+  if (isnan(TEMP_MAX) || TEMP_MAX == -1)
+  {
+    TEMP_MAX = 125.0f;
+  }
+  if (isnan(I_MAX_CONT) || I_MAX_CONT == -1)
+  {
+    I_MAX_CONT = 14.0f;
+  }
+  if (isnan(I_CAL) || I_CAL == -1)
+  {
+    I_CAL = 5.0f;
+  }
+  if (isnan(PPAIRS) || PPAIRS == -1)
+  {
+    PPAIRS = 21.0f;
+  }
+  if (isnan(GR) || GR == -1)
+  {
+    GR = 1.0f;
+  }
+  if (isnan(KT) || KT == -1)
+  {
+    KT = 1.0f;
+  }
+  if (isnan(KP_MAX) || KP_MAX == -1)
+  {
+    KP_MAX = 500.0f;
+  }
+  if (isnan(KD_MAX) || KD_MAX == -1)
+  {
+    KD_MAX = 5.0f;
+  }
+  if (isnan(P_MAX))
+  {
+    P_MAX = 12.5f;
+  }
+  if (isnan(P_MIN))
+  {
+    P_MIN = -12.5f;
+  }
+  if (isnan(V_MAX))
+  {
+    V_MAX = 65.0f;
+  }
+  if (isnan(V_MIN))
+  {
+    V_MIN = -65.0f;
+  }
 
   printf("\r\nFirmware Version Number: %.2f\r\n", VERSION_NUM);
 
   /* Controller Setup */
-  if(PHASE_ORDER){							// Timer channel to phase mapping
-
+  if (PHASE_ORDER)
+  {  // Timer channel to phase mapping
   }
-  else{
-
+  else
+  {
   }
 
   init_controller_params(&controller);
@@ -198,11 +261,19 @@ int main(void)
   comm_encoder.e_zero = E_ZERO;
   comm_encoder.ppairs = PPAIRS;
 
-  if(EN_ENC_LINEARIZATION){memcpy(&comm_encoder.offset_lut, &ENCODER_LUT, sizeof(comm_encoder.offset_lut));}	// Copy the linearization lookup table
-  else{memset(&comm_encoder.offset_lut, 0, sizeof(comm_encoder.offset_lut));}
-  ps_warmup(&comm_encoder, 100);			// clear the noisy data when the encoder first turns on
+  if (EN_ENC_LINEARIZATION)
+  {
+    memcpy(&comm_encoder.offset_lut, &ENCODER_LUT,
+           sizeof(comm_encoder.offset_lut));
+  }  // Copy the linearization lookup table
+  else
+  {
+    memset(&comm_encoder.offset_lut, 0, sizeof(comm_encoder.offset_lut));
+  }
+  ps_warmup(&comm_encoder,
+            100);  // clear the noisy data when the encoder first turns on
 
-  //for(int i = 0; i<128; i++){printf("%d\r\n", comm_encoder.offset_lut[i]);}
+  // for(int i = 0; i<128; i++){printf("%d\r\n", comm_encoder.offset_lut[i]);}
 
   /* Turn on ADCs */
   HAL_ADC_Start(&hadc1);
@@ -210,28 +281,39 @@ int main(void)
   HAL_ADC_Start(&hadc3);
 
   /* DRV8323 setup */
-  HAL_GPIO_WritePin(DRV_CS, GPIO_PIN_SET ); 	// CS high
-  HAL_GPIO_WritePin(ENABLE_PIN, GPIO_PIN_SET );
+  HAL_GPIO_WritePin(DRV_CS, GPIO_PIN_SET);  // CS high
+  HAL_GPIO_WritePin(ENABLE_PIN, GPIO_PIN_SET);
   HAL_Delay(1);
-  //drv_calibrate(drv);
+  // drv_calibrate(drv);
   HAL_Delay(1);
-  drv_write_DCR(drv, 0x0, DIS_GDF_EN, 0x0, PWM_MODE_3X, 0x0, 0x0, 0x0, 0x0, 0x1);
+  drv_write_DCR(drv, 0x0, DIS_GDF_EN, 0x0, PWM_MODE_3X, 0x0, 0x0, 0x0, 0x0,
+                0x1);
   HAL_Delay(1);
   int CSA_GAIN;
-  if(I_MAX <= 40.0f){CSA_GAIN = CSA_GAIN_40;}	// Up to 40A use 40X amplifier gain
-  else{CSA_GAIN = CSA_GAIN_20;}					// From 40-60A use 20X amplifier gain.  (Make this generic in the future)
-  drv_write_CSACR(drv, 0x0, 0x1, 0x0, CSA_GAIN_40, 0x0, 0x1, 0x1, 0x1, SEN_LVL_0_25);
+  if (I_MAX <= 40.0f)
+  {
+    CSA_GAIN = CSA_GAIN_40;
+  }  // Up to 40A use 40X amplifier gain
+  else
+  {
+    CSA_GAIN = CSA_GAIN_20;
+  }  // From 40-60A use 20X amplifier gain.  (Make this generic in the future)
+  drv_write_CSACR(drv, 0x0, 0x1, 0x0, CSA_GAIN_40, 0x0, 0x1, 0x1, 0x1,
+                  SEN_LVL_0_25);
   HAL_Delay(1);
-  drv_write_CSACR(drv, 0x0, 0x1, 0x0, CSA_GAIN, 0x1, 0x0, 0x0, 0x0, SEN_LVL_0_25);
+  drv_write_CSACR(drv, 0x0, 0x1, 0x0, CSA_GAIN, 0x1, 0x0, 0x0, 0x0,
+                  SEN_LVL_0_25);
   HAL_Delay(1);
   zero_current(&controller);
   HAL_Delay(1);
-  drv_write_OCPCR(drv, TRETRY_50US, DEADTIME_50NS, OCP_RETRY, OCP_DEG_8US, VDS_LVL_0_45);
+  drv_write_OCPCR(drv, TRETRY_50US, DEADTIME_50NS, OCP_RETRY, OCP_DEG_8US,
+                  VDS_LVL_0_45);
   HAL_Delay(1);
   drv_disable_gd(drv);
   HAL_Delay(1);
-  //drv_enable_gd(drv);   */
-  printf("ADC A OFFSET: %d     ADC B OFFSET: %d\r\n", controller.adc_a_offset, controller.adc_b_offset);
+  // drv_enable_gd(drv);   */
+  printf("ADC A OFFSET: %d     ADC B OFFSET: %d\r\n", controller.adc_a_offset,
+         controller.adc_b_offset);
 
   /* Turn on PWM */
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
@@ -239,20 +321,33 @@ int main(void)
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);
 
   /* CAN setup */
+  printf("CAN ID: %d\r\n", CAN_ID);
   can_rx_init(&can_rx);
   can_tx_init(&can_tx);
-  HAL_CAN_Start(&CAN_H); //start CAN
-  //__HAL_CAN_ENABLE_IT(&CAN_H, CAN_IT_RX_FIFO0_MSG_PENDING); // Start can interrupt
+  HAL_CAN_Start(&CAN_H);  // start CAN
+  //__HAL_CAN_ENABLE_IT(&CAN_H, CAN_IT_RX_FIFO0_MSG_PENDING); // Start can
+  //interrupt
+  __HAL_CAN_ENABLE_IT(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING |
+                                  CAN_IT_RX_FIFO1_MSG_PENDING | CAN_IT_ERROR);
+  /*
+HAL_StatusTypeDef status;
+// Enable interrupts for RX FIFO 0 message pending and TX mailbox empty
+status = HAL_CAN_ActivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING |
+CAN_IT_TX_MAILBOX_EMPTY | CAN_IT_ERROR);
+if (status != HAL_OK) {
+  printf("Could not activate CAN interrupt: %d\n", status);
+}
+*/
 
   /* Set Interrupt Priorities */
-  HAL_NVIC_SetPriority(PWM_ISR, 0x0,0x0); // commutation > communication
-  HAL_NVIC_SetPriority(CAN_ISR, 0x01, 0x01);
+  // HAL_NVIC_SetPriority(PWM_ISR, 0x0,0x0); // commutation > communication
+  // HAL_NVIC_SetPriority(CAN_ISR, 0x01, 0x01);
+  HAL_NVIC_SetPriority(CAN_ISR, 0x00, 0x00);
 
   /* Start the FSM */
   state.state = MENU_MODE;
   state.next_state = MENU_MODE;
   state.ready = 1;
-
 
   /* Turn on interrupts */
   HAL_UART_Receive_IT(&huart2, (uint8_t *)Serial2RxBuffer, 1);
@@ -262,37 +357,96 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+  uint32_t last_time = HAL_GetTick();
   while (1)
   {
+    HAL_Delay(100);
+    // drv_print_faults(drv);
 
-	  HAL_Delay(100);
-	  drv_print_faults(drv);
-	 // if(state.state==MOTOR_MODE){
-	  	  //printf("%.2f %.2f %.2f %.2f %.2f\r\n", controller.p_des, controller.v_des, controller.kp, controller.kd, controller.t_ff);
-	  //}
+    // every 15 seconds, send a CAN message
+    if (last_time + 1500 < HAL_GetTick())
+    {
+      last_time = HAL_GetTick();
+
+      uint32_t TxMailbox;
+      for (int i = 0; i < 5; i++)
+      {
+        printf("Sending CAN attempt %d\r\n", i);
+        pack_reply(&can_tx, CAN_ID, comm_encoder.angle_multiturn[0] / GR,
+                   comm_encoder.velocity / GR, controller.i_q_filt * KT * GR,
+                   controller.v_bus_filt);  // Pack response
+        HAL_StatusTypeDef status = HAL_CAN_AddTxMessage(
+            &CAN_H, &can_tx.tx_header, can_tx.data, &TxMailbox);
+        if (status == HAL_OK)
+        {
+          printf("CAN Message Sent\r\n");
+
+          if (HAL_CAN_IsTxMessagePending(&CAN_H, TxMailbox))
+          {
+            printf("Message is still pending in mailbox %ld\r\n", TxMailbox);
+          }
+          else
+          {
+            printf("Message sent from mailbox %ld\r\n", TxMailbox);
+          }
+
+          break;
+        }
+        else
+        {
+          switch (status)
+          {
+            case HAL_OK:
+              break;
+            case HAL_ERROR:
+              printf("CAN Error\r\n");
+              break;
+            case HAL_BUSY:
+              printf("CAN Busy\r\n");
+              break;
+            case HAL_TIMEOUT:
+              printf("CAN Timeout\r\n");
+              break;
+          }
+          HAL_Delay(10);
+          printf("Retrying CAN Message\r\n");
+        }
+      }
+
+      drv_print_faults(drv);
+      PrintCANErrorMessages(&CAN_H);
+      PrintCANStatusRegisters(&CAN_H);
+    }
+
+    // if(state.state==MOTOR_MODE){
+    // printf("%.2f %.2f %.2f %.2f %.2f\r\n", controller.p_des,
+    // controller.v_des, controller.kp, controller.kd, controller.t_ff);
+    //}
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
   }
+
   /* USER CODE END 3 */
 }
 
 /**
-  * @brief System Clock Configuration
-  * @retval None
-  */
+ * @brief System Clock Configuration
+ * @retval None
+ */
 void SystemClock_Config(void)
 {
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
 
   /** Configure the main internal regulator output voltage
-  */
+   */
   __HAL_RCC_PWR_CLK_ENABLE();
   __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
+
   /** Initializes the RCC Oscillators according to the specified parameters
-  * in the RCC_OscInitTypeDef structure.
-  */
+   * in the RCC_OscInitTypeDef structure.
+   */
   RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
   RCC_OscInitStruct.HSEState = RCC_HSE_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
@@ -306,16 +460,18 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
+
   /** Activate the Over-Drive mode
-  */
+   */
   if (HAL_PWREx_EnableOverDrive() != HAL_OK)
   {
     Error_Handler();
   }
+
   /** Initializes the CPU, AHB and APB buses clocks
-  */
-  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
-                              |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
+   */
+  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK |
+                                RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2;
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV4;
@@ -332,9 +488,9 @@ void SystemClock_Config(void)
 /* USER CODE END 4 */
 
 /**
-  * @brief  This function is executed in case of error occurrence.
-  * @retval None
-  */
+ * @brief  This function is executed in case of error occurrence.
+ * @retval None
+ */
 void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
@@ -343,21 +499,20 @@ void Error_Handler(void)
   /* USER CODE END Error_Handler_Debug */
 }
 
-#ifdef  USE_FULL_ASSERT
+#ifdef USE_FULL_ASSERT
 /**
-  * @brief  Reports the name of the source file and the source line number
-  *         where the assert_param error has occurred.
-  * @param  file: pointer to the source file name
-  * @param  line: assert_param error line source number
-  * @retval None
-  */
+ * @brief  Reports the name of the source file and the source line number
+ *         where the assert_param error has occurred.
+ * @param  file: pointer to the source file name
+ * @param  line: assert_param error line source number
+ * @retval None
+ */
 void assert_failed(uint8_t *file, uint32_t line)
 {
   /* USER CODE BEGIN 6 */
-  /* User can add his own implementation to report the file name and line number,
-     tex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
+  /* User can add his own implementation to report the file name and line
+     number, tex: printf("Wrong parameters value: file %s on line %d\r\n", file,
+     line) */
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
-
-/************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/
