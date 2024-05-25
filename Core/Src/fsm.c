@@ -238,6 +238,7 @@
 	    printf(" c - Calibrate Encoder\n\r");
 	    printf(" s - Setup\n\r");
 	    printf(" e - Display Encoder\n\r");
+      printf(" d - Display CAN\n\r");
 	    printf(" z - Set Zero Position\n\r");
 	    printf(" esc - Exit to Menu\n\r");
 

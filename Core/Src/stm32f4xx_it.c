@@ -234,12 +234,13 @@ void CAN1_RX0_IRQHandler(void)
 {
   /* USER CODE BEGIN CAN1_RX0_IRQn 0 */
 
-  printf("CAN1_RX0_IRQHandler\n\r");
+  //printf("CAN1_RX0_IRQHandler\n\r");
 
   /* USER CODE END CAN1_RX0_IRQn 0 */
   HAL_CAN_IRQHandler(&hcan1);
   /* USER CODE BEGIN CAN1_RX0_IRQn 1 */
 
+#if 0
   HAL_CAN_GetRxMessage(&CAN_H, CAN_RX_FIFO0, &can_rx.rx_header,
                        can_rx.data);  // Read CAN
   uint32_t TxMailbox;
@@ -279,6 +280,7 @@ void CAN1_RX0_IRQHandler(void)
     controller.timeout = 0;                   // Reset timeout counter
   }
 
+#endif
   /* USER CODE END CAN1_RX0_IRQn 1 */
 }
 

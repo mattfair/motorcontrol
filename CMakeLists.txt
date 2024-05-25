@@ -11,6 +11,13 @@
 #          make -C Release VERBOSE=1 -j
 #############################################################################################################################
 cmake_minimum_required(VERSION 3.20)
+include(${CMAKE_SOURCE_DIR}/cmake/utils.cmake)
+set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/modules")
+
+#find_package(lcov REQUIRED)
+#find_package(genhtml REQUIRED)
+#find_package(gtest REQUIRED)
+find_package(nnvg REQUIRED)
 
 ###################### CONSTANTS ######################################
 set (PROJECT_TYPE_EXECUTABLE          "exe")
@@ -35,6 +42,9 @@ set (MFLOAT_ABI_MIX                   "-mfloat-abi=softfp")
 
 set(CMAKE_SIZE_UTIL arm-none-eabi-size)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+set(CMAKE_C_STANDARD 17)
+set(CMAKE_C_STANDARD_REQUIRED ON)
 #######################################################################
 
 ###################### VARIABLES ######################################
@@ -107,9 +117,107 @@ set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
 # HAL library for GPIO
 add_definitions(-DUSE_HAL_DRIVER -DSTM32F446xx)
 
-############ MODIFY ACCORDING TO REQUIREMENTS) ########################
+### DDSL ###
 
-#######################################################################
+SET(NUNAVUT_SUBMODULES_ROOT "${CMAKE_SOURCE_DIR}/dsdl")
+set(NUNAVUT_GENERATED_ROOT ${CMAKE_BINARY_DIR}/generated)
+set(NUNAVUT_LANG_STANDARD "c11")
+set(NUNAVUT_LANG "c")
+
+if(DEFINED ENV{NUNAVUT_LANG})
+     message(STATUS "Getting NUNAVUT_LANG from the environment ($ENV{NUNAVUT_LANG})")
+     set(NUNAVUT_LANG "$ENV{NUNAVUT_LANG}" CACHE STRING "The Nunavut output language.")
+else()
+     set(NUNAVUT_LANG "unspecified" CACHE STRING "The Nunavut output language.")
+endif()
+
+if(NOT DEFINED NUNAVUT_TARGET_ENDIANNESS)
+     set(NUNAVUT_TARGET_ENDIANNESS "any" CACHE STRING "The endianess for the target architecture.")
+endif()
+
+if(NOT DEFINED NUNAVUT_SER_ASSERT)
+     set(NUNAVUT_SER_ASSERT ON CACHE BOOL "Enable or disable serialization asserts in generated code.")
+endif()
+
+if(NOT DEFINED NUNAVUT_SER_FP_DISABLE)
+     set(NUNAVUT_SER_FP_DISABLE OFF CACHE BOOL "Enable or disable floating point support in generated support code.")
+endif()
+
+if(NOT DEFINED NUNAVUT_OVR_VAR_ARRAY_ENABLE)
+     set(NUNAVUT_OVR_VAR_ARRAY_ENABLE OFF CACHE BOOL "Enable or disable override variable array capacity in generated support code.")
+endif()
+
+#
+# Generate serialization support headers
+#
+create_dsdl_target(nunavut-support
+                   ${NUNAVUT_LANG}
+                   "${NUNAVUT_LANG_STANDARD}"
+                   ${NUNAVUT_GENERATED_ROOT}/${NUNAVUT_LANG}/default
+                   ""
+                   OFF
+                   ${NUNAVUT_SER_ASSERT}
+                   ${NUNAVUT_SER_FP_DISABLE}
+                   ${NUNAVUT_OVR_VAR_ARRAY_ENABLE}
+                   ON
+                   "${NUNAVUT_TARGET_ENDIANNESS}"
+                   "only")
+
+#
+# Generate types for the Cyphal v1 public_regulated_data_types set.
+#
+create_dsdl_target(dsdl-regulated
+                   ${NUNAVUT_LANG}
+                   "${NUNAVUT_LANG_STANDARD}"
+                   ${NUNAVUT_GENERATED_ROOT}/${NUNAVUT_LANG}/default
+                   ${NUNAVUT_SUBMODULES_ROOT}/public_regulated_data_types/uavcan
+                   OFF
+                   ${NUNAVUT_SER_ASSERT}
+                   ${NUNAVUT_SER_FP_DISABLE}
+                   ${NUNAVUT_OVR_VAR_ARRAY_ENABLE}
+                   ON
+                   "${NUNAVUT_TARGET_ENDIANNESS}"
+                   "never")
+
+add_dependencies(dsdl-regulated nunavut-support)
+
+#
+# Generate types for the non-standard regulated identifiers public_regulated_data_types set.
+#
+create_dsdl_target(dsdl-non-standard
+                   ${NUNAVUT_LANG}
+                   "${NUNAVUT_LANG_STANDARD}"
+                   ${NUNAVUT_GENERATED_ROOT}/${NUNAVUT_LANG}/default
+                   ${NUNAVUT_SUBMODULES_ROOT}/public_regulated_data_types/reg
+                   OFF
+                   ${NUNAVUT_SER_ASSERT}
+                   ${NUNAVUT_SER_FP_DISABLE}
+                   ${NUNAVUT_OVR_VAR_ARRAY_ENABLE}
+                   ON
+                   "${NUNAVUT_TARGET_ENDIANNESS}"
+                   "never"
+                   ${NUNAVUT_SUBMODULES_ROOT}/public_regulated_data_types/uavcan)
+
+add_dependencies(dsdl-non-standard nunavut-support)
+add_dependencies(dsdl-non-standard nunavut-regulated)
+
+add_definitions(-DNUNAVUT_ASSERT=assert)
+
+# Forward the revision information to the compiler so that we could expose it at runtime. This is entirely optional.
+execute_process(
+        COMMAND git rev-parse --short=16 HEAD
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        OUTPUT_VARIABLE vcs_revision_id
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+
+message(STATUS "vcs_revision_id: ${vcs_revision_id}")
+add_definitions(
+        -DVERSION_MAJOR=1
+        -DVERSION_MINOR=0
+        -DVCS_REVISION_ID=0x${vcs_revision_id}ULL
+        -DNODE_NAME="com.mattfair.udral.servo"
+)
 
 ################## PROJECT SETUP ######################################
 project(${PROJECT_NAME})
@@ -123,7 +231,10 @@ elseif (${PROJECT_TYPE} MATCHES ${PROJECT_TYPE_STATIC_LIBRARY})
 endif()
 
 add_compile_definitions (${PROJECT_DEFINES})
-include_directories (${INCLUDE_DIRS})
+include_directories (${INCLUDE_DIRS} ${NUNAVUT_GENERATED_ROOT}/${NUNAVUT_LANG}/default)
+add_dependencies(${PROJECT_NAME} dsdl-regulated)
+add_dependencies(${PROJECT_NAME} dsdl-non-standard)
+add_dependencies(${PROJECT_NAME} nunavut-support)
 
 set (CMAKE_EXECUTABLE_SUFFIX ".elf")
 set (CMAKE_STATIC_LIBRARY_SUFFIX ".a")

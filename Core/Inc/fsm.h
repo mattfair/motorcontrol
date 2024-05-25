@@ -14,14 +14,15 @@ extern "C" {
 
 #include <stdint.h>
 
-
-
-#define MENU_MODE           0
-#define CALIBRATION_MODE    1
-#define MOTOR_MODE          2
-#define SETUP_MODE          4
-#define ENCODER_MODE        5
-#define INIT_TEMP_MODE      6
+enum FsmState 
+{
+  MENU_MODE,
+  CALIBRATION_MODE,
+  MOTOR_MODE,
+  SETUP_MODE,
+  ENCODER_MODE,
+  INIT_TEMP_MODE
+};
 
 #define MENU_CMD			27
 #define MOTOR_CMD			'm'
@@ -31,11 +32,9 @@ extern "C" {
 #define ZERO_CMD			'z'
 #define ENTER_CMD			13
 
-
-
 typedef struct{
-	uint8_t state;
-	uint8_t next_state;
+	enum FsmState state;
+	enum FsmState next_state;
 	uint8_t state_change;
 	uint8_t ready;
 	char cmd_buff[8];
