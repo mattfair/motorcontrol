@@ -8,6 +8,7 @@
 #include "register.h"
 
 #include <assert.h>
+#include <stdalign.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -46,6 +47,7 @@ static bool flash_unlock(void)
 
 // Locks the flash memory after writing
 static void flash_lock(void) { HAL_FLASH_Lock(); }
+
 
 int serializeRegister(const Register *reg, uint8_t *buffer, size_t buffer_size)
 {
@@ -97,14 +99,10 @@ int deserializeRegister(Register *reg, const uint8_t *buffer, size_t buffer_size
 
 int findRegisterIndex(const char *name)
 {
-  // printf("Register size: %d\r\n", REGISTER_SIZE);
-  // printf("Register max count: %ld\r\n", REGISTER_MAX_COUNT);
-  // printf("Register flash size: %ld\r\n", REGISTER_FLASH_SIZE);
   printf("Finding register index for %s\r\n", name);
 
   if (validRegisterCount == 0)
   {
-    // printf("No valid registers found\r\n");
     return -1;
   }
 
@@ -118,7 +116,6 @@ int findRegisterIndex(const char *name)
     }
   }
 
-  // printf("Name: %s, Index: -1\r\n", name);
   return -1; // Not found
 }
 
@@ -220,14 +217,15 @@ bool RegisterRead(const char *name, uavcan_register_Value_1_0 *value)
     printf("Invalid address for register %s\r\n", name);
     return false;
   }
-
-  uint8_t serialized[REGISTER_SIZE] = {0};
-  size_t sr_size = REGISTER_SIZE;
-  if (flash_read(address, &serialized[0], sr_size))
+  size_t buffer_size = REGISTER_SIZE;
+  uint8_t buffer[buffer_size];
+  if (flash_read(address, &buffer[0], buffer_size))
   {
     Register reg = {0};
-    const int size = deserializeRegister(&reg, serialized, sr_size);
-    if (size >= 0)
+    assert(address != 0);
+    memcpy(buffer, (void *)address, buffer_size);
+    int status = deserializeRegister(&reg, buffer, &buffer_size);
+    if (status >= 0)
     {
       init_required |= !RegisterAssign(value, &reg.value);
     }
@@ -247,8 +245,7 @@ bool RegisterRead(const char *name, uavcan_register_Value_1_0 *value)
   return true;
 }
 
-// Store the given register value into the persistent storage.
-bool RegisterWrite(const char *name, const uavcan_register_Value_1_0 *value)
+bool register_write(const char *name, const uavcan_register_Value_1_0 *value, bool imutable)
 {
   printf("Write register %s\r\n", name);
   int index = findRegisterIndex(name);
@@ -264,22 +261,34 @@ bool RegisterWrite(const char *name, const uavcan_register_Value_1_0 *value)
     }
   }
 
+  Register reg = {0};
   uint32_t address = get_register_address(index);
-  if (address == 0)
+  size_t buffer_size = REGISTER_SIZE;
+  uint8_t buffer[buffer_size];
+
+  assert(address != 0);
+  memcpy(buffer, (void *)address, buffer_size);
+  int status = deserializeRegister(&reg, buffer, buffer_size);
+  if (status < 0)
   {
-    printf("Invalid address for register %s\r\n", name);
+    printf("Could not deserialize register %s\r\n", name);
     return false;
   }
 
-  Register reg = {0};
-  memcpy(&reg.name.name.elements[0], name, strlen(name));
-  reg.name.name.count = strlen(name);
-  memcpy(&reg.value, value, sizeof(uavcan_register_Value_1_0));
+  // Check if the register is immutable
+  //if (reg.isImmutable)
+  //{
+  //  printf("Attempt to write immutable register %s denied\r\n", name);
+  //  return false;
+ // }
 
-  uint8_t buffer[REGISTER_SIZE];
-  size_t sr_size = serializeRegister(&reg, buffer, REGISTER_SIZE);
+  if (reg.name.name.count == 255)
+  {
+    reg.name = registerNames[index];
+  }
 
-  if (sr_size > 0)
+  status = serializeRegister(&reg, buffer, &buffer_size);
+  if (status > 0)
   {
     flash_unlock();
     bool success = flash_write(address, buffer, REGISTER_SIZE);
@@ -299,6 +308,12 @@ bool RegisterWrite(const char *name, const uavcan_register_Value_1_0 *value)
     return false;
   }
 }
+
+// Store the given register value into the persistent storage.
+bool RegisterWrite(const char *name, const uavcan_register_Value_1_0 *value) { return register_write(name, value, false); }
+
+// Store the given register value into the persistent storage and mark it as immutable.
+bool RegisterImutableWrite(const char *name, const uavcan_register_Value_1_0 *value) { return register_write(name, value, true); }
 
 bool RegisterAssign(uavcan_register_Value_1_0 *const dst, const uavcan_register_Value_1_0 *const src)
 {
@@ -346,11 +361,18 @@ uavcan_register_Name_1_0 RegisterGetNameByIndex(const uint16_t index)
 {
   Register reg;
   uint32_t address = FLASH_USER_START_ADDR + REGISTER_SIZE * index;
-  uint16_t buffer_size = sizeof(Register);
+  size_t buffer_size = REGISTER_SIZE;
   uint8_t buffer[buffer_size];
 
   memcpy(buffer, (void *)address, buffer_size);
-  deserializeRegister(&reg, buffer, buffer_size);
+  int status = deserializeRegister(&reg, buffer, buffer_size);
+  if (status < 0)
+  {
+    printf("Failed to deserialize register %d\r\n", index);
+    uavcan_register_Name_1_0 empty;
+    uavcan_register_Name_1_0_initialize_(&empty);
+    return empty;
+  }
 
   if (reg.name.name.count == 255)
   {
@@ -373,22 +395,21 @@ void RegisterDoFactoryReset(void)
 // Function to read register data from flash
 void RegisterInit(void)
 {
-  uint16_t buffer_size = sizeof(Register);
+  Register reg = {0};;
+  size_t buffer_size = REGISTER_SIZE;
   uint8_t buffer[buffer_size];
-  Register reg;
   uint32_t address = FLASH_USER_START_ADDR;
 
   // TODO: remove
-  // RegisterDoFactoryReset();
+  //RegisterDoFactoryReset();
 
   for (int i = 0; i < REGISTER_MAX_COUNT; i++)
   {
     memcpy(buffer, (void *)address, buffer_size);
-    deserializeRegister(&reg, buffer, buffer_size);
-
-    if (reg.name.name.count == 255)
+    int status = deserializeRegister(&reg, buffer, &buffer_size);
+    if (status < 0 || reg.name.name.count == 255)
     {
-      printf("Found %d registers\r\n", i);
+      //printf("Found %d registers\r\n", i);
       break; // End of valid data
     }
 

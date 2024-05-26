@@ -80,18 +80,10 @@
 #define KILO 1000L
 #define MEGA ((int64_t)KILO * KILO)
 
-// Polynomial for CRC-64-WE
+// Polynomial for CRC-64-WE this is used for the unique-ID hash.
 #define CRC64_POLY 0x42F0E1EBA9EA3693ULL
 
-#define CAN_STD_ID_MASK 0x7FF
-#define CAN_EXT_ID_MASK 0x1FFFFFFF
-
 #define MAX_RETRY_LIMIT 5
-#define INITIAL_RETRY_DELAY 10 // Initial delay in milliseconds
-
-// Maximum CAN payload length for classic CAN is 8 bytes
-#define MAX_CAN_PAYLOAD CANARD_MTU_CAN_CLASSIC;  
-#define MAX_SEGMENTS 256
 
 typedef struct State
 {
@@ -206,8 +198,6 @@ FSMStruct state;
 EncoderStruct comm_encoder;
 DRVStruct drv;
 CalStruct comm_encoder_cal;
-CANTxMessage can_tx;
-CANRxMessage can_rx;
 
 /* init but don't allocate calibration arrays */
 int *error_array = NULL;
@@ -715,7 +705,7 @@ static void ProcessMessagePlugAndPlayNodeIDAllocation(State *const state, const 
   printf("Incoming UID hash: %llu, local UID hash: %llu\r\n", msg->unique_id_hash, uid_hash);
   if ((msg->allocated_node_id.count > 0) && (msg->unique_id_hash == uid_hash)) // Check if there's an allocated node ID and the UID hashes match
   {
-    printf("Got PnP node-ID allocation: %d\n", msg->allocated_node_id.elements[0].value);
+    printf("Got PnP node-ID allocation: %d\r\n", msg->allocated_node_id.elements[0].value);
     state->canard.node_id = (CanardNodeID)msg->allocated_node_id.elements[0].value;
     // Store the value into non-volatile storage
     uavcan_register_Value_1_0 reg = {0};
@@ -988,7 +978,7 @@ static void CanardFree(CanardInstance *const ins, void *const pointer)
  */
 HAL_StatusTypeDef attempt_transmit(CAN_HandleTypeDef *hcan, const CanardFrame *frame)
 {
-  uint32_t retryDelay = INITIAL_RETRY_DELAY;
+  uint32_t retryDelay = 10;
   int retryCount = 0;
 
   while (retryCount < MAX_RETRY_LIMIT)
@@ -1272,11 +1262,8 @@ if (status != HAL_OK) {
   printf("CAN ID: %d\r\n", state.canard.node_id);
 
   /* CAN setup */
-  // can_rx_init(&can_rx);
-  // can_tx_init(&can_tx);
-
   CAN_FilterTypeDef sFilterConfig = {0};
-  sFilterConfig.FilterBank = 0;                      // Specify the filter bank (0 to 13 for CAN1, 14 to 27 for CAN2)
+  sFilterConfig.FilterBank = 0;                      // Specify the filter bank
   sFilterConfig.FilterMode = CAN_FILTERMODE_IDMASK;  // Use identifier mask mode
   sFilterConfig.FilterScale = CAN_FILTERSCALE_32BIT; // Use 32-bit scale for the filter
   sFilterConfig.FilterIdHigh = 0x0000;               // High 16 bits of the ID filter
@@ -1285,7 +1272,6 @@ if (status != HAL_OK) {
   sFilterConfig.FilterMaskIdLow = 0x0000;            // Low 16 bits of the ID mask
   sFilterConfig.FilterFIFOAssignment = CAN_RX_FIFO0; // Assign the filter to FIFO 0
   sFilterConfig.FilterActivation = ENABLE;           // Enable the filter
-  sFilterConfig.SlaveStartFilterBank = 14;           // Set the start bank for CAN2 filters
 
   if (HAL_CAN_ConfigFilter(&CAN_H, &sFilterConfig) != HAL_OK)
   {
@@ -1328,12 +1314,11 @@ if (status != HAL_OK) {
   val._string.value.count = 0; // The value should be empty by default, meaning that the node is not configured.
   RegisterRead("udral.pnp.cookie", &val);
 
-  // Announce which UDRAL network services we support by populating appropriate registers. They are supposed to be
-  // immutable (read-only), but in this simplified demo we don't support that, so we make them mutable (do fix this).
+  // Announce which UDRAL network services we support by populating appropriate registers. 
   uavcan_register_Value_1_0_select_string_(&val);
   strcpy((char *)val._string.value.elements, "servo"); // The prefix in port names like "servo.feedback", etc.
   val._string.value.count = strlen((const char *)val._string.value.elements);
-  RegisterWrite("reg.udral.service.actuator.servo", &val);
+  RegisterImutableWrite("reg.udral.service.actuator.servo", &val);
 
   // Configure the transport by reading the appropriate standard registers.
   uavcan_register_Value_1_0_select_natural16_(&val);

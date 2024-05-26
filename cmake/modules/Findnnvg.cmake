@@ -95,6 +95,8 @@ function (create_dsdl_target ARG_TARGET_NAME
         message(STATUS "nnvg:Enabling support for experimental languages.")
     endif()
 
+    message(STATUS "Executing nnvg with command: ${NNVG} ${NNVG_CMD_ARGS}")
+
     execute_process(COMMAND ${NNVG} --generate-support=${ARG_GENERATE_SUPPORT} --list-outputs ${NNVG_CMD_ARGS}
                     OUTPUT_VARIABLE OUTPUT_FILES
                     RESULT_VARIABLE LIST_OUTPUTS_RESULT)

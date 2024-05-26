@@ -56,6 +56,16 @@ bool RegisterRead(const char* name, uavcan_register_Value_1_0* value);
 bool RegisterWrite(const char* name, const uavcan_register_Value_1_0* value);
 
 /**
+ * @brief Store the given register value into the persistent storage and mark it as immutable.
+ *
+ * @param name name of the registry value
+ * @param value pointer to the value
+ * @return true if successful
+ * @return false if failed
+ */
+bool RegisterImutableWrite(const char* name, const uavcan_register_Value_1_0* value);
+
+/**
  * @brief Copy one value to the other if their types and dimensionality are the same or automatic conversion is possible. If the destination is empty,
  * it is simply replaced with the source (assignment always succeeds). The return value is true if the assignment has been performed, false if it is
  * not possible (in the latter case the destination is NOT modified).

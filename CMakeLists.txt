@@ -16,7 +16,6 @@ set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/modules")
 
 #find_package(lcov REQUIRED)
 #find_package(genhtml REQUIRED)
-#find_package(gtest REQUIRED)
 find_package(nnvg REQUIRED)
 
 ###################### CONSTANTS ######################################
@@ -40,28 +39,18 @@ set (MFLOAT_ABI_SOFTWARE              "-mfloat-abi=soft")
 set (MFLOAT_ABI_HARDWARE              "-mfloat-abi=hard")
 set (MFLOAT_ABI_MIX                   "-mfloat-abi=softfp")
 
-set(CMAKE_SIZE_UTIL arm-none-eabi-size)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-
-set(CMAKE_C_STANDARD 17)
+set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 #######################################################################
 
 ###################### VARIABLES ######################################
 set (PROJECT_NAME             "motorcontrol")
 set (PROJECT_TYPE             "exe")
-set (LINKER_SCRIPT            "../STM32F446RETX_FLASH.ld")
-set (MCPU                     "-mcpu=Cortex-M4")
-set (MFPU                 "-mfpu=fpv4-sp-d16")
-set (MFLOAT_ABI               "")
-set (RUNTIME_LIBRARY          "--specs=nano.specs")
-set (RUNTIME_LIBRARY_SYSCALLS "--specs=nosys.specs")
 
 set(CMAKE_C_FLAGS_DEBUG "-g -O0")
 set(CMAKE_CXX_FLAGS_DEBUG "-g -O0")
 
-# set(NEWLIB_PATH "/usr/include/newlib/" CACHE PATH "Path to the newlib c library headers")
-	
 file(GLOB PROJECT_SOURCES "${CMAKE_SOURCE_DIR}/Core/Src/*.c")
 list(APPEND PROJECT_SOURCES "${CMAKE_SOURCE_DIR}/Core/Startup/startup_stm32f446retx.s")
 file(GLOB_RECURSE STM32_DRIVER_SOURCES "${CMAKE_SOURCE_DIR}/Drivers/*.c")
@@ -70,8 +59,6 @@ list(APPEND PROJECT_SOURCES ${STM32_DRIVER_SOURCES})
 file(GLOB HEADER_FILES "${CMAKE_SOURCE_DIR}/Core/Inc/*.h")
 file(GLOB_RECURSE STM32_DRIVER_HEADER_FILES "${CMAKE_SOURCE_DIR}/Drivers/*.h")
 list(APPEND HEADER_FILES ${STM32_DRIVER_HEADER_FILES})
-
-message(${HEADER_FILES})
 
 # Initialize an empty list to hold include directories
 set(INCLUDE_DIRS)
@@ -92,37 +79,27 @@ endforeach()
 
 set (PROJECT_DEFINES )
 
-set (CMAKE_SYSTEM_PROCESSOR "arm" CACHE STRING "")
-set (CMAKE_SYSTEM_NAME "Generic" CACHE STRING "")
+add_compile_definitions (${PROJECT_DEFINES})
+include_directories (${INCLUDE_DIRS})
 
-# Skip link step during toolchain validation.
-set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+# Define build options
+option(BUILD_ARM "Build for ARM target" OFF)
+option(BUILD_NATIVE "Build native tests" OFF)
 
-# Specify toolchain. NOTE When building from inside STM32CubeIDE the location of the toolchain is resolved by the "MCU Toolchain" project setting (via PATH).  
-set(TOOLCHAIN_PREFIX   "arm-none-eabi-")
-set(CMAKE_C_COMPILER   "${TOOLCHAIN_PREFIX}gcc")
-set(CMAKE_ASM_COMPILER "${TOOLCHAIN_PREFIX}gcc")
-set(CMAKE_CXX_COMPILER "${TOOLCHAIN_PREFIX}g++")
-set(CMAKE_AR           "${TOOLCHAIN_PREFIX}ar")
-set(CMAKE_LINKER       "{TOOLCHAIN_PREFIX}ld")
-set(CMAKE_OBJCOPY      "${TOOLCHAIN_PREFIX}objcopy")
-set(CMAKE_RANLIB       "${TOOLCHAIN_PREFIX}ranlib")
-set(CMAKE_SIZE         "${TOOLCHAIN_PREFIX}size")
-set(CMAKE_STRIP        "${TOOLCHAIN_PREFIX}ld")
-
-set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
-set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
-set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
+if(BUILD_ARM AND BUILD_NATIVE)
+    message(FATAL_ERROR "Cannot specify both BUILD_ARM and BUILD_NATIVE")
+endif()
 
 # HAL library for GPIO
 add_definitions(-DUSE_HAL_DRIVER -DSTM32F446xx)
 
 ### DDSL ###
-
 SET(NUNAVUT_SUBMODULES_ROOT "${CMAKE_SOURCE_DIR}/dsdl")
 set(NUNAVUT_GENERATED_ROOT ${CMAKE_BINARY_DIR}/generated)
 set(NUNAVUT_LANG_STANDARD "c11")
 set(NUNAVUT_LANG "c")
+
+include_directories(${NUNAVUT_GENERATED_ROOT}/${NUNAVUT_LANG}/default)
 
 if(DEFINED ENV{NUNAVUT_LANG})
      message(STATUS "Getting NUNAVUT_LANG from the environment ($ENV{NUNAVUT_LANG})")
@@ -181,7 +158,6 @@ create_dsdl_target(dsdl-regulated
 
 add_dependencies(dsdl-regulated nunavut-support)
 
-#
 # Generate types for the non-standard regulated identifiers public_regulated_data_types set.
 #
 create_dsdl_target(dsdl-non-standard
@@ -200,6 +176,29 @@ create_dsdl_target(dsdl-non-standard
 
 add_dependencies(dsdl-non-standard nunavut-support)
 add_dependencies(dsdl-non-standard nunavut-regulated)
+
+#
+# Generate types for custom mattfair types
+#
+create_dsdl_target(dsdl-mattfair
+                   ${NUNAVUT_LANG}
+                   "${NUNAVUT_LANG_STANDARD}"
+                   ${NUNAVUT_GENERATED_ROOT}/${NUNAVUT_LANG}/default
+                   ${NUNAVUT_SUBMODULES_ROOT}/mattfair
+                   OFF
+                   ${NUNAVUT_SER_ASSERT}
+                   ${NUNAVUT_SER_FP_DISABLE}
+                   ${NUNAVUT_OVR_VAR_ARRAY_ENABLE}
+                   ON
+                   "${NUNAVUT_TARGET_ENDIANNESS}"
+                   "never"
+                   ${NUNAVUT_SUBMODULES_ROOT}/public_regulated_data_types/uavcan
+                   ${NUNAVUT_SUBMODULES_ROOT}/public_regulated_data_types/reg
+                  )
+
+
+add_dependencies(dsdl-mattfair nunavut-regulated)
+add_dependencies(dsdl-mattfair nunavut-non-standard)
 
 add_definitions(-DNUNAVUT_ASSERT=assert)
 
@@ -221,78 +220,148 @@ add_definitions(
 
 ################## PROJECT SETUP ######################################
 project(${PROJECT_NAME})
-enable_language(ASM)
 
-if (${PROJECT_TYPE} MATCHES ${PROJECT_TYPE_EXECUTABLE})
-  add_executable(${PROJECT_NAME} ${PROJECT_SOURCES})
-  add_custom_command(TARGET ${CMAKE_PROJECT_NAME} POST_BUILD COMMAND ${CMAKE_SIZE} $<TARGET_FILE:${CMAKE_PROJECT_NAME}>)
-elseif (${PROJECT_TYPE} MATCHES ${PROJECT_TYPE_STATIC_LIBRARY})
-  add_library(${PROJECT_NAME} ${PROJECT_SOURCES})
+if(BUILD_ARM)
+    enable_language(ASM)
+    set(CMAKE_SIZE_UTIL arm-none-eabi-size)
+
+    set (LINKER_SCRIPT            "${CMAKE_SOURCE_DIR}/STM32F446RETX_FLASH.ld")
+    set (MCPU                     "-mcpu=Cortex-M4")
+    set (MFPU                 "-mfpu=fpv4-sp-d16")
+    set (MFLOAT_ABI               "-mfloat-abi=hard")
+    set (RUNTIME_LIBRARY          "--specs=nano.specs")
+    set (RUNTIME_LIBRARY_SYSCALLS "--specs=nosys.specs")
+
+    set (CMAKE_EXECUTABLE_SUFFIX ".elf")
+    set (CMAKE_STATIC_LIBRARY_SUFFIX ".a")
+    set (CMAKE_C_FLAGS "${MCPU} -std=gnu11 ${MFPU} ${MFLOAT_ABI} ${RUNTIME_LIBRARY} -mthumb -Wall") # -Werror")
+    set (CMAKE_EXE_LINKER_FLAGS "-T${LINKER_SCRIPT} ${RUNTIME_LIBRARY_SYSCALLS} -Wl,-Map=test.map -Wl,--gc-sections -static -Wl,--start-group -lc -lm -Wl,--end-group")
+    set (CMAKE_ASM_FLAGS "${CMAKE_C_FLAGS} -x assembler-with-cpp")
+
+    # Set up ARM toolchain
+    set(CMAKE_SYSTEM_PROCESSOR "arm" CACHE STRING "")
+    set(CMAKE_SYSTEM_NAME "Generic" CACHE STRING "")
+    set(TOOLCHAIN_PREFIX "arm-none-eabi-")
+
+    # Skip link step during toolchain validation
+    set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+
+    # Specify toolchain
+    set(CMAKE_C_COMPILER   "${TOOLCHAIN_PREFIX}gcc")
+    set(CMAKE_ASM_COMPILER "${TOOLCHAIN_PREFIX}gcc")
+    set(CMAKE_CXX_COMPILER "${TOOLCHAIN_PREFIX}g++")
+    set(CMAKE_AR           "${TOOLCHAIN_PREFIX}ar")
+    set(CMAKE_LINKER       "${TOOLCHAIN_PREFIX}ld")
+    set(CMAKE_OBJCOPY      "${TOOLCHAIN_PREFIX}objcopy")
+    set(CMAKE_RANLIB       "${TOOLCHAIN_PREFIX}ranlib")
+    set(CMAKE_SIZE         "${TOOLCHAIN_PREFIX}size")
+    set(CMAKE_STRIP        "${TOOLCHAIN_PREFIX}ld")
+
+    set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
+    set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
+    set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
+
+    # arm target
+    add_executable(arm_motorcontrol ${PROJECT_SOURCES})
+    target_include_directories(arm_motorcontrol PRIVATE ${INCLUDE_DIRS})
+    target_compile_definitions(arm_motorcontrol PRIVATE -DUSE_HAL_DRIVER -DSTM32F446xx)
+    set_target_properties(arm_motorcontrol PROPERTIES
+        C_COMPILER arm-none-eabi-gcc
+        CXX_COMPILER arm-none-eabi-g++
+    )
+    target_compile_options(arm_motorcontrol PRIVATE -mcpu=cortex-m4 -mthumb -mfpu=fpv4-sp-d16 -mfloat-abi=hard -Wall)
+    add_dependencies(arm_motorcontrol dsdl-regulated)
+    add_dependencies(arm_motorcontrol dsdl-non-standard)
+    add_dependencies(arm_motorcontrol dsdl-mattfair)
+    add_dependencies(arm_motorcontrol nunavut-support)
+
+    # Add a post-build command to generate a binary file from the ELF output
+    add_custom_command(TARGET arm_motorcontrol POST_BUILD
+        COMMAND arm-none-eabi-objcopy -O binary $<TARGET_FILE:arm_motorcontrol> arm_motorcontrol.bin
+        COMMAND ls -l arm_motorcontrol.bin
+        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+        COMMENT "Converting ELF to BIN and getting size")
+
+    add_custom_target(
+      bin ALL  # 'ALL' means this target is part of the default build
+      DEPENDS ${CMAKE_BINARY_DIR}/arm_motorcontrol.bin  # Ensure the bin is created/updated
+    )
+
+    add_custom_target(
+        flash
+        COMMAND st-flash write arm_motorcontrol.bin 0x08000000
+        COMMAND st-flash reset
+        DEPENDS ${CMAKE_BINARY_DIR}/arm_motorcontrol.bin  # Ensure bin is created before flashing
+        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+        COMMENT "Flashing the firmware to the device"
+    )
+
+    add_custom_target(info
+        COMMAND st-info --probe
+        COMMENT "Getting info from the device using st-info")
+
+    add_custom_target(
+        unlock
+        COMMAND ${CMAKE_SOURCE_DIR}/scripts/memory.sh --unlock
+        COMMENT "Unlocking flash memory on the device"
+    )
+
+    add_custom_target(
+        lock
+        COMMAND ${CMAKE_SOURCE_DIR}/scripts/memory.sh --lock
+        COMMENT "Locking flash memory on the device"
+    )
+
+    add_custom_target(
+        reset
+        COMMAND st-flash reset
+        COMMENT "Resetting device"
+    )
+
+    add_custom_target(
+        debug-server
+        COMMAND ${CMAKE_SOURCE_DIR}/scripts/run-debug-server.sh
+        COMMENT "Starting debug server"
+    )
+
+    add_custom_target(
+        debug
+        COMMAND gdb-multiarch $<TARGET_FILE:arm_motorcontrol> -ex "target extended-remote localhost:3333"
+        COMMENT "Starting GDB"
+    )
+elseif(BUILD_NATIVE)
+    find_package(gtest REQUIRED)
+    add_subdirectory(${GOOGLETEST_SUBMODULE})
+
+    # Native test target
+    enable_testing()
+
+    file(GLOB_RECURSE TEST_SOURCES "tests/*_test.c" "tests/*_test.cpp")
+    list(APPEND TEST_SOURCES "${CMAKE_SOURCE_DIR}/tests/main.cpp")
+
+    add_executable(test_runner ${TEST_SOURCES})
+    target_include_directories(test_runner PRIVATE ${INCLUDE_DIRS} ${GTEST_INCLUDE_DIRS})
+    add_dependencies(test_runner gtest gmock)
+
+    SET(GTEST_LIBRARIES gtest gmock)
+
+    target_link_libraries(test_runner PRIVATE ${GTEST_LIBRARIES} pthread)
+    add_test(NAME tests COMMAND test_runner)
+
+    # Set test properties to enable colored output and verbose output on failure
+    set_tests_properties(tests PROPERTIES
+        ENVIRONMENT "GTEST_COLOR=1"
+        TIMEOUT 30
+        LABELS "unit"
+    )
+
+      # Custom target to run tests with ctest --output-on-failure
+    add_custom_target(run_tests
+        COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure
+        DEPENDS test_runner
+        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+        COMMENT "Running tests with verbose output on failure"
+    )
+else()
+    message(FATAL_ERROR "Must specify either BUILD_ARM or BUILD_NATIVE")
 endif()
-
-add_compile_definitions (${PROJECT_DEFINES})
-include_directories (${INCLUDE_DIRS} ${NUNAVUT_GENERATED_ROOT}/${NUNAVUT_LANG}/default)
-add_dependencies(${PROJECT_NAME} dsdl-regulated)
-add_dependencies(${PROJECT_NAME} dsdl-non-standard)
-add_dependencies(${PROJECT_NAME} nunavut-support)
-
-set (CMAKE_EXECUTABLE_SUFFIX ".elf")
-set (CMAKE_STATIC_LIBRARY_SUFFIX ".a")
-set (CMAKE_C_FLAGS "${MCPU} -std=gnu11 ${MFPU} ${MFLOAT_ABI} ${RUNTIME_LIBRARY} -mthumb -Wall") # -Werror")
-set (CMAKE_EXE_LINKER_FLAGS "-T${LINKER_SCRIPT} ${RUNTIME_LIBRARY_SYSCALLS} -Wl,-Map=test.map -Wl,--gc-sections -static -Wl,--start-group -lc -lm -Wl,--end-group")
-set (CMAKE_ASM_FLAGS "${CMAKE_C_FLAGS} -x assembler-with-cpp")
-
-# Add a post-build command to generate a binary file from the ELF output
-add_custom_command(TARGET motorcontrol POST_BUILD
-    COMMAND arm-none-eabi-objcopy -O binary $<TARGET_FILE:motorcontrol> motorcontrol.bin
-    COMMAND ls -l motorcontrol.bin
-    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-    COMMENT "Converting ELF to BIN and getting size")
-
-add_custom_target(
-    bin ALL  # 'ALL' means this target is part of the default build
-    DEPENDS ${CMAKE_BINARY_DIR}/motorcontrol.bin  # Ensure the bin is created/updated
-)
-
-add_custom_target(
-    flash
-    COMMAND st-flash write motorcontrol.bin 0x08000000
-    COMMAND st-flash reset
-    DEPENDS ${CMAKE_BINARY_DIR}/motorcontrol.bin  # Ensure bin is created before flashing
-    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-    COMMENT "Flashing the firmware to the device"
-)
-
-add_custom_target(info
-    COMMAND st-info --probe
-    COMMENT "Getting info from the device using st-info")
-
-add_custom_target(
-    unlock
-    COMMAND ${CMAKE_SOURCE_DIR}/scripts/memory.sh --unlock
-    COMMENT "Unlocking flash memory on the device"
-)
-
-add_custom_target(
-    lock
-    COMMAND ${CMAKE_SOURCE_DIR}/scripts/memory.sh --lock
-    COMMENT "Locking flash memory on the device"
-)
-
-add_custom_target(
-    reset
-    COMMAND st-flash reset
-    COMMENT "Resetting device"
-)
-
-add_custom_target(
-    debug-server
-    COMMAND ${CMAKE_SOURCE_DIR}/scripts/run-debug-server.sh
-    COMMENT "Starting debug server"
-)
-
-add_custom_target(
-    debug
-    COMMAND gdb-multiarch $<TARGET_FILE:motorcontrol> -ex "target extended-remote localhost:3333"
-    COMMENT "Starting GDB"
-)
