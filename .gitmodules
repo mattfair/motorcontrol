@@ -7,3 +7,6 @@
 [submodule "submodules/public_regulated_data_types"]
 	path = submodules/public_regulated_data_types
 	url = https://github.com/OpenCyphal/public_regulated_data_types.git
+[submodule "submodules/cpputest"]
+	path = submodules/cpputest
+	url = https://github.com/cpputest/cpputest.git

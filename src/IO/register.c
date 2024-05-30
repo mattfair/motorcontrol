@@ -7,22 +7,37 @@
  */
 #include "register.h"
 
+static bool register_is_initialized = false;
+static uint32_t register_start_addr = 0;
+static uint32_t register_end_addr = 0;
+static uint16_t register_size = 0;
+
+void RegisterInit(uint32_t start_addr, uint32_t end_addr)
+{
+  register_start_addr = start_addr;
+  register_end_addr = end_addr;
+  register_is_initialized = true;
+  register_size = (uint16_t)(end_addr - start_addr + 1);
+}
+
+bool RegisterIsInitialized() { return register_is_initialized; }
+
+uint32_t RegisterGetStart() { return register_start_addr; }
+uint32_t RegisterGetEnd() { return register_end_addr; }
+
+#if 0
 #include <assert.h>
 #include <stdalign.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
-#include "stm32f4xx_hal.h"
+#include "flash.h"
 
 #define PASTE3_IMPL(x, y, z) x##y##z
 #define PASTE3(x, y, z) PASTE3_IMPL(x, y, z)
 
-#define ADDR_FLASH_SECTOR_7 ((uint32_t)0x08060000) /* Base @ of Sector 7, 128 Kbytes */
 #define FLASH_USER_SECTOR FLASH_SECTOR_7
-#define FLASH_USER_START_ADDR ADDR_FLASH_SECTOR_7
-#define FLASH_SECTOR_SIZE 128 * 1024
-#define FLASH_USER_END_ADDR (ADDR_FLASH_SECTOR_7 + FLASH_SECTOR_SIZE - 1)
 
 typedef struct
 {
@@ -30,24 +45,12 @@ typedef struct
   uavcan_register_Value_1_0 value;
 } Register;
 
-#define REGISTER_SIZE sizeof(Register)
-#define REGISTER_MAX_COUNT ((FLASH_USER_END_ADDR - FLASH_USER_START_ADDR + 1) / REGISTER_SIZE)
-#define REGISTER_FLASH_SIZE (REGISTER_MAX_COUNT * REGISTER_SIZE)
+const uint32_t registerSize = sizeof(Register);
+const uint32_t REGISTER_MAX_COUNT = ((FLASH_USER_END_ADDR - FLASH_USER_START_ADDR + 1) / registerSize);
 
-static uavcan_register_Name_1_0 registerNames[REGISTER_MAX_COUNT];
 static int validRegisterCount = 0;
-
-// Unlocks the flash memory for writing
-static bool flash_unlock(void)
-{
-  HAL_FLASH_Unlock();
-  __HAL_FLASH_CLEAR_FLAG(FLASH_FLAG_EOP | FLASH_FLAG_OPERR | FLASH_FLAG_WRPERR | FLASH_FLAG_PGAERR | FLASH_FLAG_PGPERR | FLASH_FLAG_PGSERR);
-  return true;
-}
-
-// Locks the flash memory after writing
-static void flash_lock(void) { HAL_FLASH_Lock(); }
-
+static uint32_t maxRegisterCount = 0;
+static uavcan_register_Name_1_0 registerNames[maxRegisterCount];
 
 int serializeRegister(const Register *reg, uint8_t *buffer, size_t buffer_size)
 {
@@ -122,67 +125,20 @@ int findRegisterIndex(const char *name)
 // Function to calculate the address for a given register index
 static uint32_t get_register_address(uint16_t index)
 {
-  if (index >= REGISTER_MAX_COUNT)
+  if (index >= maxRegisterCount)
   {
-    printf("index %d >= REGISTER_MAX_COUNT %ld\r\n", index, REGISTER_MAX_COUNT);
+    printf("index %d >= maxRegisterCount %ld\r\n", index, maxRegisterCount);
     return 0; // Invalid index
   }
-  return FLASH_USER_START_ADDR + (index * REGISTER_SIZE);
+  return FLASH_USER_START_ADDR + (index * registerSize);
 }
 
-// Function to read data from flash memory
-static bool flash_read(uint32_t address, void *data, size_t size)
-{
-  if (address < FLASH_USER_START_ADDR || address + size > FLASH_USER_END_ADDR)
-  {
-    return false;
-  }
-
-  memcpy(data, (const void *)address, size);
-  return true;
-}
-
-// Function to write data to flash memory
-static bool flash_write(uint32_t address, const void *data, size_t size)
-{
-  if (address < FLASH_USER_START_ADDR || address + size > FLASH_USER_END_ADDR)
-  {
-    return false;
-  }
-
-  const uint8_t *data_ptr = (const uint8_t *)data;
-  for (size_t i = 0; i < size; i++)
-  {
-    if (HAL_FLASH_Program(FLASH_TYPEPROGRAM_BYTE, address + i, data_ptr[i]) != HAL_OK)
-    {
-      return false;
-    }
-  }
-  return true;
-}
-
-// Erases the flash memory sector where registers are stored
-static bool flash_erase(void)
-{
-  FLASH_EraseInitTypeDef erase_init_struct;
-  uint32_t page_error;
-  erase_init_struct.TypeErase = FLASH_TYPEERASE_SECTORS;
-  erase_init_struct.Sector = FLASH_USER_SECTOR;
-  erase_init_struct.NbSectors = 1;
-  erase_init_struct.VoltageRange = FLASH_VOLTAGE_RANGE_3;
-
-  if (HAL_FLASHEx_Erase(&erase_init_struct, &page_error) != HAL_OK)
-  {
-    return false;
-  }
-  return true;
-}
 
 int createIndex(const char *name, const uavcan_register_Value_1_0 *value)
 {
   int index = -1;
   printf("Creating index for %s\r\n", name);
-  if (validRegisterCount >= REGISTER_MAX_COUNT)
+  if (validRegisterCount >= maxRegisterCount)
   {
     printf("Max register count reached\r\n");
     return index;
@@ -191,7 +147,7 @@ int createIndex(const char *name, const uavcan_register_Value_1_0 *value)
   uavcan_register_Name_1_0 registerName = {0};
   memcpy(&registerName.name.elements[0], name, strlen(name));
   registerName.name.count = strlen(name);
-  memcpy(&registerNames[validRegisterCount], &registerName, REGISTER_SIZE);
+  memcpy(&registerNames[validRegisterCount], &registerName, registerSize);
   index = validRegisterCount++;
 
   return index;
@@ -217,7 +173,7 @@ bool RegisterRead(const char *name, uavcan_register_Value_1_0 *value)
     printf("Invalid address for register %s\r\n", name);
     return false;
   }
-  size_t buffer_size = REGISTER_SIZE;
+  size_t buffer_size = registerSize;
   uint8_t buffer[buffer_size];
   if (flash_read(address, &buffer[0], buffer_size))
   {
@@ -263,7 +219,7 @@ bool register_write(const char *name, const uavcan_register_Value_1_0 *value, bo
 
   Register reg = {0};
   uint32_t address = get_register_address(index);
-  size_t buffer_size = REGISTER_SIZE;
+  size_t buffer_size = registerSize;
   uint8_t buffer[buffer_size];
 
   assert(address != 0);
@@ -291,7 +247,7 @@ bool register_write(const char *name, const uavcan_register_Value_1_0 *value, bo
   if (status > 0)
   {
     flash_unlock();
-    bool success = flash_write(address, buffer, REGISTER_SIZE);
+    bool success = flash_write(address, buffer, registerSize);
     flash_lock();
 
     printf("Writing register %s to index %d...\r\n", name, index);
@@ -360,8 +316,8 @@ bool RegisterAssign(uavcan_register_Value_1_0 *const dst, const uavcan_register_
 uavcan_register_Name_1_0 RegisterGetNameByIndex(const uint16_t index)
 {
   Register reg;
-  uint32_t address = FLASH_USER_START_ADDR + REGISTER_SIZE * index;
-  size_t buffer_size = REGISTER_SIZE;
+  uint32_t address = flash_get_start_addr() + registerSize * index;
+  size_t buffer_size = registerSize;
   uint8_t buffer[buffer_size];
 
   memcpy(buffer, (void *)address, buffer_size);
@@ -393,17 +349,20 @@ void RegisterDoFactoryReset(void)
 }
 
 // Function to read register data from flash
-void RegisterInit(void)
+void RegisterInit(uint32_t start_addr, uint32_t end_addr)
 {
+  init_flash(start_addr, end_addr);
+  maxRegisterCount = (end_addr - start_addr + 1) / registerSize;
+
   Register reg = {0};;
-  size_t buffer_size = REGISTER_SIZE;
+  size_t buffer_size = registerSize;
   uint8_t buffer[buffer_size];
-  uint32_t address = FLASH_USER_START_ADDR;
+  uint32_t address = start_addr;
 
   // TODO: remove
   //RegisterDoFactoryReset();
 
-  for (int i = 0; i < REGISTER_MAX_COUNT; i++)
+  for (int i = 0; i < maxRegisterCount; i++)
   {
     memcpy(buffer, (void *)address, buffer_size);
     int status = deserializeRegister(&reg, buffer, &buffer_size);
@@ -420,3 +379,4 @@ void RegisterInit(void)
     address += buffer_size;
   }
 }
+#endif

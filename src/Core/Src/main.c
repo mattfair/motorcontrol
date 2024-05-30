@@ -72,6 +72,10 @@
 #include "structs.h"
 #include "user_config.h"
 
+const uint32_t FLASH_USER_START_ADDR = ((uint32_t)0x08060000); /* Base @ of Sector 7, 128 Kbytes */
+const uint32_t FLASH_SECTOR_SIZE = 128 * 1024;
+const uint32_t FLASH_USER_END_ADDR = FLASH_USER_START_ADDR + FLASH_SECTOR_SIZE - 1;
+
 #define CAN_REDUNDANCY_FACTOR 1
 
 /// For CAN FD the queue can be smaller.

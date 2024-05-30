@@ -49,7 +49,7 @@ void order_phases(EncoderStruct *encoder, ControllerStruct *controller, CalStruc
 	reset_foc(controller);
 
 	float theta_end = encoder->angle_multiturn[0];
-	cal->ppairs = round(2.0f*PI_F/fabsf(theta_end-cal->theta_start));
+	cal->ppairs = (uint8_t)round(2.0f*PI_F/fabsf(theta_end-cal->theta_start));
 
 	if(cal->theta_start < theta_end){
 		cal->phase_order = 0;
@@ -60,7 +60,7 @@ void order_phases(EncoderStruct *encoder, ControllerStruct *controller, CalStruc
 		printf("Swapping phase sign\r\n");
 	}
     printf("Pole Pairs: %d\r\n", cal->ppairs);
-    printf("Start: %.3f   End: %.3f\r\n", cal->theta_start, theta_end);
+    printf("Start: %.3f   End: %.3f\r\n", (double)cal->theta_start, (double)theta_end);
     PHASE_ORDER = cal->phase_order;
     PPAIRS = (float)cal->ppairs;
     cal->started = 0;

@@ -1,6 +1,17 @@
-#include <gtest/gtest.h>
+#include <CppUTest/CommandLineTestRunner.h>
+#include "GTestOutput.h"
 
-int main(int argc, char **argv) {
-    ::testing::InitGoogleTest(&argc, argv);
-    return RUN_ALL_TESTS();
+class CustomCommandLineTestRunner : public CommandLineTestRunner {
+public:
+    CustomCommandLineTestRunner(int argc, const char* const* argv)
+        : CommandLineTestRunner(argc, argv, TestRegistry::getCurrentRegistry()) {}
+
+    TestOutput* createConsoleOutput() override {
+        return new GTestOutput;
+    }
+};
+
+int main(int argc, char** argv) {
+    CustomCommandLineTestRunner runner(argc, argv);
+    return runner.runAllTestsMain();
 }

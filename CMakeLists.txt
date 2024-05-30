@@ -50,14 +50,19 @@ set (PROJECT_TYPE             "exe")
 
 set(CMAKE_C_FLAGS_DEBUG "-g -O0")
 set(CMAKE_CXX_FLAGS_DEBUG "-g -O0")
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
-file(GLOB PROJECT_SOURCES "${CMAKE_SOURCE_DIR}/Core/Src/*.c")
-list(APPEND PROJECT_SOURCES "${CMAKE_SOURCE_DIR}/Core/Startup/startup_stm32f446retx.s")
-file(GLOB_RECURSE STM32_DRIVER_SOURCES "${CMAKE_SOURCE_DIR}/Drivers/*.c")
+
+file(GLOB PROJECT_SOURCES "${CMAKE_SOURCE_DIR}/src/Core/Src/*.c")
+list(APPEND PROJECT_SOURCES "${CMAKE_SOURCE_DIR}/src/Core/Startup/startup_stm32f446retx.s")
+file(GLOB_RECURSE STM32_DRIVER_SOURCES "${CMAKE_SOURCE_DIR}/src/Drivers/*.c")
 list(APPEND PROJECT_SOURCES ${STM32_DRIVER_SOURCES})
+list(REMOVE_ITEM PROJECT_SOURCES "${CMAKE_SOURCE_DIR}/src/Core/Src/main.c")
 
-file(GLOB HEADER_FILES "${CMAKE_SOURCE_DIR}/Core/Inc/*.h")
-file(GLOB_RECURSE STM32_DRIVER_HEADER_FILES "${CMAKE_SOURCE_DIR}/Drivers/*.h")
+file(GLOB HEADER_FILES "${CMAKE_SOURCE_DIR}/src/Core/Inc/*.h")
+file(GLOB_RECURSE STM32_DRIVER_HEADER_FILES "${CMAKE_SOURCE_DIR}/src/Drivers/*.h")
 list(APPEND HEADER_FILES ${STM32_DRIVER_HEADER_FILES})
 
 # Initialize an empty list to hold include directories
@@ -80,18 +85,17 @@ endforeach()
 set (PROJECT_DEFINES )
 
 add_compile_definitions (${PROJECT_DEFINES})
-include_directories (${INCLUDE_DIRS})
 
 # Define build options
-option(BUILD_ARM "Build for ARM target" OFF)
-option(BUILD_NATIVE "Build native tests" OFF)
-
-if(BUILD_ARM AND BUILD_NATIVE)
-    message(FATAL_ERROR "Cannot specify both BUILD_ARM and BUILD_NATIVE")
-endif()
+option(BUILD_STM32F4 "Build for HAL F4" OFF)
+option(BUILD_TESTS "Build native tests" OFF)
 
 # HAL library for GPIO
-add_definitions(-DUSE_HAL_DRIVER -DSTM32F446xx)
+add_definitions(-DUSE_HAL_DRIVER)
+
+if(BUILD_STM32F4)
+  add_definitions(-DSTM32F4 -DSTM32F446xx)
+endif()
 
 ### DDSL ###
 SET(NUNAVUT_SUBMODULES_ROOT "${CMAKE_SOURCE_DIR}/dsdl")
@@ -99,7 +103,7 @@ set(NUNAVUT_GENERATED_ROOT ${CMAKE_BINARY_DIR}/generated)
 set(NUNAVUT_LANG_STANDARD "c11")
 set(NUNAVUT_LANG "c")
 
-include_directories(${NUNAVUT_GENERATED_ROOT}/${NUNAVUT_LANG}/default)
+list(APPEND INCLUDE_DIRS "${NUNAVUT_GENERATED_ROOT}/${NUNAVUT_LANG}/default")
 
 if(DEFINED ENV{NUNAVUT_LANG})
      message(STATUS "Getting NUNAVUT_LANG from the environment ($ENV{NUNAVUT_LANG})")
@@ -200,6 +204,8 @@ create_dsdl_target(dsdl-mattfair
 add_dependencies(dsdl-mattfair nunavut-regulated)
 add_dependencies(dsdl-mattfair nunavut-non-standard)
 
+set(DSDL_LIBRARIES dsdl-regulated dsdl-non-standard dsdl-mattfair nunavut-support)
+
 add_definitions(-DNUNAVUT_ASSERT=assert)
 
 # Forward the revision information to the compiler so that we could expose it at runtime. This is entirely optional.
@@ -221,7 +227,97 @@ add_definitions(
 ################## PROJECT SETUP ######################################
 project(${PROJECT_NAME})
 
-if(BUILD_ARM)
+if(BUILD_TESTS)
+    include(${CMAKE_SOURCE_DIR}/cmake/utils.cmake)
+    apply_flag_set(${CMAKE_SOURCE_DIR}/cmake/compiler_flag_sets/native.cmake "" "" "")
+
+    # Compile at 32-bit
+    SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -m32")
+    SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -m32")
+    SET(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -m32")
+
+    set(IO_SRC 
+      #"${CMAKE_SOURCE_DIR}/src/IO/register.c"
+      "${CMAKE_SOURCE_DIR}/src/IO/flash.c"
+    )
+    list(APPEND INCLUDE_DIRS "${CMAKE_SOURCE_DIR}/src")
+    list(APPEND INCLUDE_DIRS "${CMAKE_SOURCE_DIR}/tests/mocks/")
+
+    add_library(io ${IO_SRC})
+    target_include_directories(io PRIVATE ${INCLUDE_DIRS})
+    add_dependencies(io dsdl-regulated dsdl-non-standard dsdl-mattfair nunavut-support)
+
+    # TODO: work on removing these
+    add_compile_options(
+      #    -Wno-c++17-attribute-extensions
+    #    -Wno-error=float-conversion
+    #    -Wno-error=conversion
+    #    -Wno-error=unused-parameter
+    #    -Wno-error=double-promotion
+    #    -Wno-error=float-equal
+    #    -Wno-error=builtin-declaration-mismatch
+    #    -Wno-error=format
+    #    -Wno-error=missing-declarations
+        -Wno-error=sign-conversion
+    #    -Wno-error=implicit-function-declaration
+    #    -Wno-error=comment
+    #    -Wno-error=unused-variable
+    #    -Wno-error=switch
+        -Wno-error=switch-enum
+    #    -Wno-error=pedantic
+    #    -Wno-error=int-conversion
+    #    -Wno-error=sign-compare
+    #    -Wno-error=pointer-sign
+         -Wno-error=old-style-cast
+         -Wno-error=missing-declarations
+    )
+
+    #find_package(gtest REQUIRED)
+    #add_subdirectory(${GOOGLETEST_SUBMODULE})
+    #SET(GTEST_LIBRARIES gtest gmock)
+
+    set(TESTS OFF CACHE BOOL "Switch off CppUTest Test build")
+    add_subdirectory(${CMAKE_SOURCE_DIR}/submodules/cpputest)
+    set(CPPUTest_COMPILE_FLAGS -Wno-error=old-style-cast -Wno-error=sign-promo)
+    target_compile_options(CppUTest PRIVATE ${CPPUTest_COMPILE_FLAGS})
+    target_compile_options(CppUTestExt PRIVATE ${CPPUTest_COMPILE_FLAGS})
+
+    set(CPPUTest_LIBRARIES CppUTest CppUTestExt)
+    set(CPPUTest_INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/submodules/cpputest/include ${CMAKE_SOURCE_DIR}/submodules/cpputest/include/Platforms/Gcc)
+
+    # Native test target
+    enable_testing()
+
+    file(GLOB_RECURSE IO_TEST_SOURCES "tests/IO/*_test.cpp")
+    list(REMOVE_ITEM IO_TEST_SOURCES "${CMAKE_SOURCE_DIR}/tests/IO/register_test.cpp")
+
+    set(IO_MOCKS_SOURCES 
+      "${CMAKE_SOURCE_DIR}/tests/mocks/IO/mock_flash.cpp"
+    )
+
+    add_executable(io_test_runner 
+      ${IO_TEST_SOURCES}
+      ${IO_MOCKS_SOURCES}
+      "${CMAKE_SOURCE_DIR}/tests/main.cpp"
+    )
+    target_include_directories(io_test_runner PRIVATE ${INCLUDE_DIRS} ${CPPUTest_INCLUDE_DIRS})
+    target_link_libraries(io_test_runner PRIVATE ${CPPUTest_LIBRARIES} ${DSDL_LIBRARIES} io)
+    add_dependencies(io_test_runner ${CPPUTest_LIBRARIES} ${DSDL_LIBRARIES} io)
+    target_compile_options(io_test_runner PRIVATE ${CPPUTest_COMPILE_FLAGS})
+
+    add_test(NAME io COMMAND io_test_runner)
+
+    # Custom target to run all tests with ctest --output-on-failure
+    add_custom_target(run_tests
+        COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure
+        DEPENDS io_test_runner
+        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+        COMMENT "Running tests with verbose output on failure"
+    )
+else()
+    # Cross compile for ARM
+
+    include_directories (${INCLUDE_DIRS})
     enable_language(ASM)
     set(CMAKE_SIZE_UTIL arm-none-eabi-size)
 
@@ -262,9 +358,8 @@ if(BUILD_ARM)
     set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
 
     # arm target
-    add_executable(arm_motorcontrol ${PROJECT_SOURCES})
+    add_executable(arm_motorcontrol ${PROJECT_SOURCES} "${CMAKE_SOURCE_DIR}/src/Core/Src/main.c")
     target_include_directories(arm_motorcontrol PRIVATE ${INCLUDE_DIRS})
-    target_compile_definitions(arm_motorcontrol PRIVATE -DUSE_HAL_DRIVER -DSTM32F446xx)
     set_target_properties(arm_motorcontrol PROPERTIES
         C_COMPILER arm-none-eabi-gcc
         CXX_COMPILER arm-none-eabi-g++
@@ -329,39 +424,4 @@ if(BUILD_ARM)
         COMMAND gdb-multiarch $<TARGET_FILE:arm_motorcontrol> -ex "target extended-remote localhost:3333"
         COMMENT "Starting GDB"
     )
-elseif(BUILD_NATIVE)
-    find_package(gtest REQUIRED)
-    add_subdirectory(${GOOGLETEST_SUBMODULE})
-
-    # Native test target
-    enable_testing()
-
-    file(GLOB_RECURSE TEST_SOURCES "tests/*_test.c" "tests/*_test.cpp")
-    list(APPEND TEST_SOURCES "${CMAKE_SOURCE_DIR}/tests/main.cpp")
-
-    add_executable(test_runner ${TEST_SOURCES})
-    target_include_directories(test_runner PRIVATE ${INCLUDE_DIRS} ${GTEST_INCLUDE_DIRS})
-    add_dependencies(test_runner gtest gmock)
-
-    SET(GTEST_LIBRARIES gtest gmock)
-
-    target_link_libraries(test_runner PRIVATE ${GTEST_LIBRARIES} pthread)
-    add_test(NAME tests COMMAND test_runner)
-
-    # Set test properties to enable colored output and verbose output on failure
-    set_tests_properties(tests PROPERTIES
-        ENVIRONMENT "GTEST_COLOR=1"
-        TIMEOUT 30
-        LABELS "unit"
-    )
-
-      # Custom target to run tests with ctest --output-on-failure
-    add_custom_target(run_tests
-        COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure
-        DEPENDS test_runner
-        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-        COMMENT "Running tests with verbose output on failure"
-    )
-else()
-    message(FATAL_ERROR "Must specify either BUILD_ARM or BUILD_NATIVE")
 endif()

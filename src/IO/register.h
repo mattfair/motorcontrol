@@ -33,6 +33,29 @@
  * specialized approach using on-chip EEPROM or similar (like PX4, Sapog, etc).
  */
 
+#ifdef __cplusplus
+ extern "C" {
+#endif
+
+void RegisterInit(uint32_t start_addr, uint32_t end_addr);
+bool RegisterIsInitialized();
+uint32_t RegisterGetStart();
+uint32_t RegisterGetEnd();
+uint16_t RegisterCount();
+
+#ifdef __cplusplus
+ }
+#endif
+
+
+#if 0
+/**
+ * @brief initialize the registers in memory
+ * @param start_addr start address of the registers
+ * @param end_addr end address of the registers
+ */
+void RegisterInit(uint32_t start_addr, uint32_t end_addr);
+
 /**
  * @brief Reads the specified register from the persistent storage into `value`. If the register does not exist or it cannot be automatically
  * converted to the type of the provided argument, the value will be stored in the persistent storage using @ref registerWrite(), overriding existing
@@ -91,8 +114,4 @@ uavcan_register_Name_1_0 RegisterGetNameByIndex(const uint16_t index);
  * @brief Erase all registers such that the defaults are used at the next launch.
  */
 void RegisterDoFactoryReset(void);
-
-/**
- * @brief Initialize the registers from flash
- */
-void RegisterInit(void);
+#endif
