@@ -87,7 +87,7 @@ set (PROJECT_DEFINES )
 add_compile_definitions (${PROJECT_DEFINES})
 
 # Define build options
-option(BUILD_STM32F4 "Build for HAL F4" OFF)
+option(BUILD_STM32F4 "Build for HAL F4" ON)
 option(BUILD_TESTS "Build native tests" OFF)
 
 # HAL library for GPIO

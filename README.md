@@ -40,11 +40,11 @@ make lock
 ```
 
 ### Building Tests
-Tests are build using GTest, and are build natively.  To build the tests, run the following commands:
+Tests are build using [CppUTest](https://github.com/cpputest/cpputest), and are build natively.  To build the tests, run the following commands:
 ```
 mkdir -p build/native
 cd build/native
-cmake -DBUILD_NATIVE=On ../..
+cmake -DBUILD_TESTING=On ../..
 make
 make run_tests
 ```
