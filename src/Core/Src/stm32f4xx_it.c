@@ -234,12 +234,13 @@ void CAN1_RX0_IRQHandler(void)
 {
   /* USER CODE BEGIN CAN1_RX0_IRQn 0 */
 
-  printf("CAN1_RX0_IRQHandler\n\r");
+  //printf("CAN1_RX0_IRQHandler\n\r");
 
   /* USER CODE END CAN1_RX0_IRQn 0 */
   HAL_CAN_IRQHandler(&hcan1);
   /* USER CODE BEGIN CAN1_RX0_IRQn 1 */
 
+#if 0
   HAL_CAN_GetRxMessage(&CAN_H, CAN_RX_FIFO0, &can_rx.rx_header,
                        can_rx.data);  // Read CAN
   uint32_t TxMailbox;
@@ -279,6 +280,7 @@ void CAN1_RX0_IRQHandler(void)
     controller.timeout = 0;                   // Reset timeout counter
   }
 
+#endif
   /* USER CODE END CAN1_RX0_IRQn 1 */
 }
 
@@ -361,54 +363,4 @@ void USART2_IRQHandler(void)
 }
 
 /* USER CODE BEGIN 1 */
-
-void can_tx_rx(void)
-{
-  int no_mesage = HAL_CAN_GetRxMessage(&CAN_H, CAN_RX_FIFO0, &can_rx.rx_header,
-                                       can_rx.data);  // Read CAN
-  if (!no_mesage)
-  {
-    printf("CAN received %0X %0X %0X %0X %0X %0X %0X %0X\n\r", can_rx.data[0],
-           can_rx.data[1], can_rx.data[2], can_rx.data[3], can_rx.data[4],
-           can_rx.data[5], can_rx.data[6], can_rx.data[7]);
-
-    uint32_t TxMailbox;
-    pack_reply(&can_tx, CAN_ID, comm_encoder.angle_multiturn[0] / GR,
-               comm_encoder.velocity / GR, controller.i_mag_max * KT * GR,
-               controller.v_max - controller.v_ref);  // Pack response
-    HAL_CAN_AddTxMessage(&CAN_H, &can_tx.tx_header, can_tx.data,
-                         &TxMailbox);  // Send response
-
-    /* Check for special Commands */
-    if (((can_rx.data[0] == 0xFF) & (can_rx.data[1] == 0xFF) &
-         (can_rx.data[2] == 0xFF) & (can_rx.data[3] == 0xFF) &
-         (can_rx.data[4] == 0xFF) & (can_rx.data[5] == 0xFF) &
-         (can_rx.data[6] == 0xFF) & (can_rx.data[7] == 0xFC)))
-    {
-      update_fsm(&state, MOTOR_CMD);
-    }
-    else if (((can_rx.data[0] == 0xFF) & (can_rx.data[1] == 0xFF) &
-              (can_rx.data[2] == 0xFF) &
-              (can_rx.data[3] == 0xFF) * (can_rx.data[4] == 0xFF) &
-              (can_rx.data[5] == 0xFF) & (can_rx.data[6] == 0xFF) &
-              (can_rx.data[7] == 0xFD)))
-    {
-      update_fsm(&state, MENU_CMD);
-    }
-    else if (((can_rx.data[0] == 0xFF) & (can_rx.data[1] == 0xFF) &
-              (can_rx.data[2] == 0xFF) &
-              (can_rx.data[3] == 0xFF) * (can_rx.data[4] == 0xFF) &
-              (can_rx.data[5] == 0xFF) & (can_rx.data[6] == 0xFF) &
-              (can_rx.data[7] == 0xFE)))
-    {
-      update_fsm(&state, ZERO_CMD);
-    }
-    else
-    {
-      unpack_cmd(can_rx, controller.commands);  // Unpack commands
-      controller.timeout = 0;                   // Reset timeout counter
-      controller.i_mag_max = controller.i_q;
-    }
-  }
-}
 /* USER CODE END 1 */

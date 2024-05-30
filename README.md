@@ -21,11 +21,12 @@ Development has mainly used CMake, any going foreward we will assume using CMake
 sudo apt install cmake gcc-arm-none-eabi make stlink-tools openocd
 ```
 
+### Cross Compiling Native
 To build using cmake, run the following commands:
 ```
-mkdir build
-cd build
-cmake ..
+mkdir -p build/arm
+cd build/arm
+cmake -DBUILD_ARM=On ../..
 make
 ```
 
@@ -36,4 +37,14 @@ make st-info
 make unlock
 make flash
 make lock
+```
+
+### Building Tests
+Tests are build using [CppUTest](https://github.com/cpputest/cpputest), and are build natively.  To build the tests, run the following commands:
+```
+mkdir -p build/native
+cd build/native
+cmake -DBUILD_TESTING=On ../..
+make
+make run_tests
 ```

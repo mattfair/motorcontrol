@@ -1,0 +1,12 @@
+# Register.1.0
+#
+# Used to serialize/deserialize register information to storage
+#
+
+uavcan.register.Name.1.0 name
+uavcan.register.Value.1.0 value
+bool isImmutable
+
+@sealed
+@assert _offset_.min == 8 + 8 + 1
+@assert _offset_.max == 2040 + 2080 + 1
