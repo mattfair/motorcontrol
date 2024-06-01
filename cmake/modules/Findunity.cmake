@@ -4,7 +4,7 @@
 # Copyright 2020 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 #
 
-set(UNITY_SUBMODULE "${NUNAVUT_SUBMODULES_ROOT}/unity")
+set(UNITY_SUBMODULE "${CMAKE_SOURCE_DIR}/submodules/cmock/vendor/unity")
 
 if(EXISTS "${UNITY_SUBMODULE}/src")
     set(UNITY_FOUND ON)
@@ -30,8 +30,11 @@ target_compile_options(unity_core PUBLIC
                         "-Wno-switch-enum"
                         "-Wno-conversion"
                         "-DUNITY_INCLUDE_DOUBLE"
-                        "${NUNAVUT_VERIFICATION_EXTRA_COMPILE_CFLAGS}"
+                        "${UNITY_EXTRA_COMPILE_CFLAGS}"
                        )
+target_compile_definitions(unity_core PUBLIC
+                           ${UNITY_EXTRA_COMPILE_DEFS}
+                          )
 
 include(FindPackageHandleStandardArgs)
 

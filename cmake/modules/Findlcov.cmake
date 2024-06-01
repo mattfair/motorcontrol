@@ -13,9 +13,9 @@ if(LCOV)
     #   consistent output is needed to ensure we can merge and compare coverage data
     #   regardless of the compiler used to create the tests.
 
-    set(NUNAVUT_GOV_TOOL_ARG )
+    set(GOV_TOOL_ARG )
 
-    if (${NUNAVUT_USE_LLVM_COV})
+    if (${USE_LLVM_COV})
         # Try to find llvm coverage. If we don't find it
         # we'll simply omit the tool arg and hope that lcov
         # can figure it out.
@@ -26,6 +26,7 @@ if(LCOV)
                 llvm-cov
                 llvm-cov-6.0
             HINTS
+                /usr/bin
                 /usr/local/opt/llvm/bin
         )
 
@@ -34,7 +35,7 @@ if(LCOV)
             # Thanks to http://logan.tw/posts/2015/04/28/check-code-coverage-with-clang-and-lcov/
             file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_FILES_DIRECTORY}/gcov_tool.sh "#!/usr/bin/env bash\nexec ${LLVM_COV} gcov \"$@\"\n")
             file(COPY ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_FILES_DIRECTORY}/gcov_tool.sh
-                DESTINATION ${NUNAVUT_VERIFICATIONS_BINARY_DIR}
+                DESTINATION ${VERIFICATIONS_BINARY_DIR}
                 NO_SOURCE_PERMISSIONS
                 FILE_PERMISSIONS OWNER_READ
                                 OWNER_WRITE
@@ -43,7 +44,7 @@ if(LCOV)
                                 GROUP_EXECUTE
                                 WORLD_READ
                                 WORLD_EXECUTE)
-            set(NUNAVUT_GOV_TOOL_ARG "--gcov-tool" "${NUNAVUT_VERIFICATIONS_BINARY_DIR}/gcov_tool.sh")
+            set(GOV_TOOL_ARG "--gcov-tool" "${NUNAVUT_VERIFICATIONS_BINARY_DIR}/gcov_tool.sh")
         else()
             message(WARNING "llvm-cov was not found but we are compiling using clang. The coverage report build step may fail.")
         endif()
@@ -65,22 +66,22 @@ if(LCOV)
         add_custom_command(
             COMMAND # Reset coverage data
                 ${LCOV}
-                        ${NUNAVUT_GOV_TOOL_ARG}
+                        ${GOV_TOOL_ARG}
                         --zerocounters
                         --directory ${CMAKE_CURRENT_BINARY_DIR}
             COMMAND # Generate initial "zero coverage" data.
                 ${LCOV}
-                        ${NUNAVUT_GOV_TOOL_ARG}
+                        ${GOV_TOOL_ARG}
                         --rc lcov_branch_coverage=1
                         --capture
                         --initial
                         --directory ${CMAKE_CURRENT_BINARY_DIR}
-                        --output-file ${NUNAVUT_VERIFICATIONS_BINARY_DIR}/coverage.baseline.info
+                        --output-file ${VERIFICATIONS_BINARY_DIR}/coverage.baseline.info
             COMMAND
                 ${ARG_OUTDIR}/${ARG_TEST_NAME}
             COMMAND # Generate coverage from tests.
                 ${LCOV}
-                        ${NUNAVUT_GOV_TOOL_ARG}
+                        ${GOV_TOOL_ARG}
                         --rc lcov_branch_coverage=1
                         --capture
                         --directory ${CMAKE_CURRENT_BINARY_DIR}
@@ -88,14 +89,14 @@ if(LCOV)
                         --output-file ${ARG_OUTDIR}/coverage.${ARG_TEST_NAME}.test.info
             COMMAND # Combine all the test runs with the baseline
                 ${LCOV}
-                        ${NUNAVUT_GOV_TOOL_ARG}
+                        ${GOV_TOOL_ARG}
                         --rc lcov_branch_coverage=1
-                        --add-tracefile ${NUNAVUT_VERIFICATIONS_BINARY_DIR}/coverage.baseline.info
+                        --add-tracefile ${VERIFICATIONS_BINARY_DIR}/coverage.baseline.info
                         --add-tracefile ${ARG_OUTDIR}/coverage.${ARG_TEST_NAME}.test.info
                         --output-file ${ARG_OUTDIR}/coverage.${ARG_TEST_NAME}.info
             COMMAND # Filter only the interesting data
                 ${LCOV}
-                        ${NUNAVUT_GOV_TOOL_ARG}
+                        ${GOV_TOOL_ARG}
                         --rc lcov_branch_coverage=1
                         --extract ${ARG_OUTDIR}/coverage.${ARG_TEST_NAME}.info
                         ${ARG_SOURCE_FILTER_DIR}
@@ -116,5 +117,4 @@ endif()
 include(FindPackageHandleStandardArgs)
 
 find_package_handle_standard_args(lcov
-    LCOV_FOUND
-)
+    LCOV_FOUND)

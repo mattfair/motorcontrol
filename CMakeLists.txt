@@ -91,19 +91,24 @@ option(BUILD_STM32F4 "Build for HAL F4" ON)
 option(BUILD_TESTS "Build native tests" OFF)
 
 # HAL library for GPIO
-add_definitions(-DUSE_HAL_DRIVER)
+add_definitions(
+  -DUSE_HAL_DRIVER
+)
 
 if(BUILD_STM32F4)
   add_definitions(-DSTM32F4 -DSTM32F446xx)
 endif()
 
+SET(GENERATED_ROOT ${CMAKE_BINARY_DIR}/generated)
+
 ### DDSL ###
 SET(NUNAVUT_SUBMODULES_ROOT "${CMAKE_SOURCE_DIR}/dsdl")
-set(NUNAVUT_GENERATED_ROOT ${CMAKE_BINARY_DIR}/generated)
+set(NUNAVUT_GENERATED_ROOT ${GENERATED_ROOT}/dsdl)
 set(NUNAVUT_LANG_STANDARD "c11")
 set(NUNAVUT_LANG "c")
 
 list(APPEND INCLUDE_DIRS "${NUNAVUT_GENERATED_ROOT}/${NUNAVUT_LANG}/default")
+list(APPEND INCLUDE_DIRS "${CMAKE_SOURCE_DIR}/src")
 
 if(DEFINED ENV{NUNAVUT_LANG})
      message(STATUS "Getting NUNAVUT_LANG from the environment ($ENV{NUNAVUT_LANG})")
@@ -240,12 +245,82 @@ if(BUILD_TESTS)
       #"${CMAKE_SOURCE_DIR}/src/IO/register.c"
       "${CMAKE_SOURCE_DIR}/src/IO/flash.c"
     )
-    list(APPEND INCLUDE_DIRS "${CMAKE_SOURCE_DIR}/src")
-    list(APPEND INCLUDE_DIRS "${CMAKE_SOURCE_DIR}/tests/mocks/")
+
+    set(VERIFICATIONS_BINARY_DIR "${CMAKE_BINARY_DIR}/verifications")
+    file(MAKE_DIRECTORY ${VERIFICATIONS_BINARY_DIR})
+    set(UNITY_EXTRA_COMPILE_DEFS
+      UNITY_OUTPUT_COLOR
+      UNITY_POINTER_WIDTH=32
+    )
+    find_package(unity REQUIRED)
+    find_package(cmock REQUIRED)
+    find_package(lcov REQUIRED)
+    find_package(genhtml REQUIRED)
+
+    include(${CMAKE_SOURCE_DIR}/cmake/testing/unity.cmake)
+    include(${CMAKE_SOURCE_DIR}/cmake/testing/cmock.cmake)
+
+    generate_cmock_config("Stm32F4xx_HAL_Driver" "mock_" "stm32f4xx_hal.h;stm32f4xx_hal_def.h;stm32f4xx_hal_conf.h;stm32f4xx_hal_rcc_ex.h;stm32f4xx_hal_dma.h")
+    create_mocks( 
+      "Stm32F4xx_HAL_Driver"
+      "${CMAKE_SOURCE_DIR}/src/Drivers/STM32F4xx_HAL_Driver/Inc/"
+      "MOCK_HAL_DRIVER_DIR"
+      "MOCK_HAL_DRIVER_SRC"
+    )
+
+    set(USE_ONLY_HAL_DRIVER_SRC 
+      "stm32f4xx_hal.c"
+      "stm32f4xx_hal_flash.c"
+      "stm32f4xx_hal_flash_ex.c"
+    )
+
+    # List to hold filtered full paths
+    set(FILTERED_MOCK_HAL_DRIVER_SRC)
+
+    # Loop through the items in MOCK_HAL_DRIVER_SRC
+    foreach(FILE ${MOCK_HAL_DRIVER_SRC})
+        # Get the filename from the path
+        get_filename_component(FILENAME ${FILE} NAME)
+        
+        # Check if the filename ends with any of the specified substrings
+        foreach(SUBSTR ${USE_ONLY_HAL_DRIVER_SRC})
+            if(${FILENAME} MATCHES "${SUBSTR}$")
+                list(APPEND FILTERED_MOCK_HAL_DRIVER_SRC ${FILE})
+            endif()
+        endforeach()
+    endforeach()
+
+    # Output the filtered list of full paths
+    message(STATUS "Filtered mock HAL driver sources: ${FILTERED_MOCK_HAL_DRIVER_SRC}")
+
+    add_library(mock_hal_driver ${FILTERED_MOCK_HAL_DRIVER_SRC})
+    target_include_directories(mock_hal_driver PRIVATE 
+      ${MOCK_HAL_DRIVER_DIR}
+      ${CMOCK_INCLUDE_DIRS} 
+      "${CMAKE_SOURCE_DIR}/src/Drivers/STM32F4xx_HAL_Driver/Inc"
+      "${CMAKE_SOURCE_DIR}/src/Core/Inc"
+      "${CMAKE_SOURCE_DIR}/src/Drivers/CMSIS/Device/ST/STM32F4xx/Include"
+      "${CMAKE_SOURCE_DIR}/src/Drivers/CMSIS/Include/"
+    )
+    target_link_libraries(mock_hal_driver PRIVATE cmock_core)
+    target_compile_options(mock_hal_driver PRIVATE
+                          "-Wno-error"  # Third-party code is not our responsibility.
+                          "-Wno-switch-enum"
+                          "-Wno-missing-declarations"
+                          "-Wno-sign-conversion"
+                          "-Wno-double-promotion"
+                          "-Wno-float-equal"
+                          "-Wno-conversion"
+                          )
+    target_compile_definitions(mock_hal_driver PRIVATE STM32F446xx)
 
     add_library(io ${IO_SRC})
     target_include_directories(io PRIVATE ${INCLUDE_DIRS})
     add_dependencies(io dsdl-regulated dsdl-non-standard dsdl-mattfair nunavut-support)
+    target_compile_options(io PRIVATE
+      -Wno-error=missing-declarations
+      -Wno-error=unused-variable
+    )
 
     # TODO: work on removing these
     add_compile_options(
@@ -272,45 +347,42 @@ if(BUILD_TESTS)
          -Wno-error=missing-declarations
     )
 
-    #find_package(gtest REQUIRED)
-    #add_subdirectory(${GOOGLETEST_SUBMODULE})
-    #SET(GTEST_LIBRARIES gtest gmock)
-
-    set(TESTS OFF CACHE BOOL "Switch off CppUTest Test build")
-    add_subdirectory(${CMAKE_SOURCE_DIR}/submodules/cpputest)
-    set(CPPUTest_COMPILE_FLAGS -Wno-error=old-style-cast -Wno-error=sign-promo)
-    target_compile_options(CppUTest PRIVATE ${CPPUTest_COMPILE_FLAGS})
-    target_compile_options(CppUTestExt PRIVATE ${CPPUTest_COMPILE_FLAGS})
-
-    set(CPPUTest_LIBRARIES CppUTest CppUTestExt)
-    set(CPPUTest_INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/submodules/cpputest/include ${CMAKE_SOURCE_DIR}/submodules/cpputest/include/Platforms/Gcc)
-
     # Native test target
     enable_testing()
 
-    file(GLOB_RECURSE IO_TEST_SOURCES "tests/IO/*_test.cpp")
-    list(REMOVE_ITEM IO_TEST_SOURCES "${CMAKE_SOURCE_DIR}/tests/IO/register_test.cpp")
-
-    set(IO_MOCKS_SOURCES 
-      "${CMAKE_SOURCE_DIR}/tests/mocks/IO/mock_flash.cpp"
+    set(TEST_LIBRARIES cmock_core unity_core mock_hal_driver)
+    set(TEST_INCLUDE_DIRS 
+      ${CPPUTest_INCLUDE_DIRS} 
+      ${CMOCK_INCLUDE_DIRS} 
+      ${MOCK_HAL_DRIVER_DIR}
     )
 
-    add_executable(io_test_runner 
-      ${IO_TEST_SOURCES}
-      ${IO_MOCKS_SOURCES}
-      "${CMAKE_SOURCE_DIR}/tests/main.cpp"
-    )
-    target_include_directories(io_test_runner PRIVATE ${INCLUDE_DIRS} ${CPPUTest_INCLUDE_DIRS})
-    target_link_libraries(io_test_runner PRIVATE ${CPPUTest_LIBRARIES} ${DSDL_LIBRARIES} io)
-    add_dependencies(io_test_runner ${CPPUTest_LIBRARIES} ${DSDL_LIBRARIES} io)
-    target_compile_options(io_test_runner PRIVATE ${CPPUTest_COMPILE_FLAGS})
+    #file(GLOB_RECURSE MOCK_SOURCES "tests/mocks/IO/*.cpp")
+    #$add_library(mocks ${MOCK_SOURCES})
+    #target_include_directories(mocks PRIVATE ${INCLUDE_DIRS} ${CPPUTest_INCLUDE_DIRS})
 
-    add_test(NAME io COMMAND io_test_runner)
+    #file(GLOB_RECURSE IO_TEST_SOURCES "tests/IO/*_test.cpp")
+    #list(REMOVE_ITEM IO_TEST_SOURCES "${CMAKE_SOURCE_DIR}/tests/IO/register_test.cpp")
+
+    create_test(io_hal_test tests/IO/hal_test.c mock_hal_driver)
+    target_include_directories(io_hal_test PRIVATE 
+      ${INCLUDE_DIRS} 
+      ${TEST_INCLUDE_DIRS}
+    )
+
+    create_test(io_flash_test tests/IO/flash_test.c io mock_hal_driver)
+    target_include_directories(io_flash_test PRIVATE 
+      ${INCLUDE_DIRS} 
+      ${TEST_INCLUDE_DIRS}
+    )
+    define_native_test_run_with_lcov("io_flash_test" ${VERIFICATIONS_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/\\*)
+    define_natve_test_coverage("io_flash_test" ${VERIFICATIONS_BINARY_DIR})
 
     # Custom target to run all tests with ctest --output-on-failure
     add_custom_target(run_tests
         COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure
-        DEPENDS io_test_runner
+        DEPENDS io_hal_test
+        DEPENDS io_flash_test
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
         COMMENT "Running tests with verbose output on failure"
     )

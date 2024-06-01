@@ -10,3 +10,6 @@
 [submodule "submodules/cpputest"]
 	path = submodules/cpputest
 	url = https://github.com/cpputest/cpputest.git
+[submodule "submodules/cmock"]
+	path = submodules/cmock
+	url = https://github.com/throwtheswitch/cmock.git
