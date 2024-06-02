@@ -18,7 +18,7 @@ This project has used STCubeMX to configure and generate code for the STM32 micr
 ### CMake
 Development has mainly used CMake, any going foreward we will assume using CMake. You must install the following dependencies:
 ```
-sudo apt install cmake gcc-arm-none-eabi make stlink-tools openocd
+sudo apt install cmake gcc-arm-none-eabi make stlink-tools openocd ruby gem lcov genhtml
 ```
 
 ### Cross Compiling Native
@@ -40,11 +40,17 @@ make lock
 ```
 
 ### Building Tests
-Tests are build using [CppUTest](https://github.com/cpputest/cpputest), and are build natively.  To build the tests, run the following commands:
+Tests are build using [Unity](https://github.com/ThrowTheSwitch/Unity).  To build the tests, run the following commands:
 ```
 mkdir -p build/native
 cd build/native
 cmake -DBUILD_TESTING=On ../..
 make
 make run_tests
+```
+
+### Code Coverage
+To generate code coverage, run the following commands:
+```
+make coverage
 ```

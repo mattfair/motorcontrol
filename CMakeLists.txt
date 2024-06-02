@@ -384,9 +384,9 @@ if(BUILD_TESTS)
     list(APPEND ALL_TESTS_WITH_LCOV "run_${NATIVE_TEST_NAME}_with_lcov")
     list(APPEND ALL_TEST_COVERAGE "--add-tracefile")
     list(APPEND ALL_TEST_COVERAGE "${VERIFICATIONS_BINARY_DIR}/coverage.${NATIVE_TEST_NAME}.filtered.info")
-    set(ALL_TESTS ${ALL_TESTS} PARENT_SCOPE)
-    set(ALL_TESTS_WITH_LCOV ${ALL_TESTS_WITH_LCOV} PARENT_SCOPE)
-    set(ALL_TEST_COVERAGE ${ALL_TEST_COVERAGE} PARENT_SCOPE)
+    set(ALL_TESTS ${ALL_TESTS})
+    set(ALL_TESTS_WITH_LCOV ${ALL_TESTS_WITH_LCOV})
+    set(ALL_TEST_COVERAGE ${ALL_TEST_COVERAGE})
 
     # Custom target to run all tests with ctest --output-on-failure
     add_custom_target(run_tests
@@ -398,48 +398,62 @@ if(BUILD_TESTS)
     )
 
     get_filename_component(NUNAVUT_PROJECT_ROOT "${CMAKE_SOURCE_DIR}" REALPATH BASE_DIR "${CMAKE_BINARY_DIR}")
-    
+
+    # Reset coverage counters
     add_custom_target(
         lcov_zero
-        ${LCOV}
+        COMMAND ${LCOV}
               ${GOV_TOOL_ARG}
               --zerocounters
               --directory ${CMAKE_CURRENT_BINARY_DIR}
         COMMENT "Resetting coverage counters."
     )
 
-
+    # Capture all coverage data
     add_custom_command(
         OUTPUT ${VERIFICATIONS_BINARY_DIR}/coverage.all.info
-        COMMAND
-              ${LCOV}
-                  ${GOV_TOOL_ARG}
-                  --rc lcov_branch_coverage=1
-                  ${ALL_TEST_COVERAGE}
-                  --output-file ${VERIFICATIONS_BINARY_DIR}/coverage.all.info
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${VERIFICATIONS_BINARY_DIR}
+        COMMAND ${LCOV}
+              ${GOV_TOOL_ARG}
+              --rc lcov_branch_coverage=1
+              ${ALL_TEST_COVERAGE}
+              --output-file ${VERIFICATIONS_BINARY_DIR}/coverage.all.info
         DEPENDS ${ALL_TESTS_WITH_LCOV}
+        COMMENT "Capturing all coverage data."
     )
 
+    # Filter out unwanted directories
+    add_custom_command(
+        OUTPUT ${VERIFICATIONS_BINARY_DIR}/coverage.filtered.info
+        COMMAND ${LCOV}
+              ${GOV_TOOL_ARG}
+              --rc lcov_branch_coverage=1
+              --remove ${VERIFICATIONS_BINARY_DIR}/coverage.all.info
+                      '*/build/*'
+                      '*/tests/*'
+                      '*/submodules/*'
+              --output-file ${VERIFICATIONS_BINARY_DIR}/coverage.filtered.info
+        DEPENDS ${VERIFICATIONS_BINARY_DIR}/coverage.all.info
+        COMMENT "Filtering out unwanted directories from coverage data."
+    )
+
+    # Include only the src directory
     add_custom_command(
         OUTPUT ${VERIFICATIONS_BINARY_DIR}/coverage.info
-        COMMAND
-              ${LCOV}
-                  ${GOV_TOOL_ARG}
-                  --rc lcov_branch_coverage=1
-                  --extract ${VERIFICATIONS_BINARY_DIR}/coverage.all.info
-                            ${PROJECT_ROOT}/\\*
-                  --output-file ${VERIFICATIONS_BINARY_DIR}/coverage.info
-        DEPENDS ${VERIFICATIONS_BINARY_DIR}/coverage.all.info
-    )
-
-    add_custom_target(
-        cov_info
+        COMMAND ${LCOV}
+              ${GOV_TOOL_ARG}
+              --rc lcov_branch_coverage=1
+              --extract ${VERIFICATIONS_BINARY_DIR}/coverage.filtered.info
+                        "${CMAKE_SOURCE_DIR}/src/*"
+              --output-file ${VERIFICATIONS_BINARY_DIR}/coverage.info
         DEPENDS ${VERIFICATIONS_BINARY_DIR}/coverage.info
+        COMMENT "Extracting coverage data for src directory."
     )
 
-    add_custom_target(
-        cov_all
-        ${GENHTML} --title "${PROJECT_NAME} native test coverage"
+    # Custom target to generate HTML report
+    add_custom_command(
+        OUTPUT ${VERIFICATIONS_BINARY_DIR}/coverage/all/index.html
+        COMMAND ${GENHTML} --title "${PROJECT_NAME} native test coverage"
               --output-directory ${VERIFICATIONS_BINARY_DIR}/coverage/all
               --demangle-cpp
               --sort
@@ -449,10 +463,31 @@ if(BUILD_TESTS)
               --legend
               --highlight
               --show-details
-              ${VERIFICATIONS_BINARY_DIR}/coverage.info
-        DEPENDS ${VERIFICATIONS_BINARY_DIR}/coverage.info
-        COMMENT "Build and run all tests and generate an overall html coverage report."
+              ${VERIFICATIONS_BINARY_DIR}/coverage.filtered.info
+        DEPENDS ${VERIFICATIONS_BINARY_DIR}/coverage.filtered.info
+        COMMENT "Generating HTML coverage report."
     )
+
+    # Add a custom target to build the coverage report
+    add_custom_target(
+        coverage_report
+        DEPENDS ${VERIFICATIONS_BINARY_DIR}/coverage/all/index.html
+    )
+
+    # Make 'coverage' target depend on the intermediate steps
+    add_custom_target(
+        coverage
+        DEPENDS coverage_report
+    )
+
+    # Debug: Print the final info file
+    add_custom_command(
+        TARGET coverage_report
+        POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E echo "Final coverage file:"
+        COMMAND ${CMAKE_COMMAND} -E cat ${VERIFICATIONS_BINARY_DIR}/coverage.filtered.info
+    )
+
 
 else()
     # Cross compile for ARM
