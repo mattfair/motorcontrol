@@ -1,5 +1,5 @@
 /*
- * Read/Write/Erase persistent flash memory using HAL library
+ * unit tests for persistent flash memory using HAL library
  */
 
 #include <IO/flash.h>
