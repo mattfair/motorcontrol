@@ -14,8 +14,6 @@ cmake_minimum_required(VERSION 3.20)
 include(${CMAKE_SOURCE_DIR}/cmake/utils.cmake)
 set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/modules")
 
-#find_package(lcov REQUIRED)
-#find_package(genhtml REQUIRED)
 find_package(nnvg REQUIRED)
 
 ###################### CONSTANTS ######################################
@@ -91,19 +89,24 @@ option(BUILD_STM32F4 "Build for HAL F4" ON)
 option(BUILD_TESTS "Build native tests" OFF)
 
 # HAL library for GPIO
-add_definitions(-DUSE_HAL_DRIVER)
+add_definitions(
+  -DUSE_HAL_DRIVER
+)
 
 if(BUILD_STM32F4)
   add_definitions(-DSTM32F4 -DSTM32F446xx)
 endif()
 
+SET(GENERATED_ROOT ${CMAKE_BINARY_DIR}/generated)
+
 ### DDSL ###
 SET(NUNAVUT_SUBMODULES_ROOT "${CMAKE_SOURCE_DIR}/dsdl")
-set(NUNAVUT_GENERATED_ROOT ${CMAKE_BINARY_DIR}/generated)
+set(NUNAVUT_GENERATED_ROOT ${GENERATED_ROOT}/dsdl)
 set(NUNAVUT_LANG_STANDARD "c11")
 set(NUNAVUT_LANG "c")
 
 list(APPEND INCLUDE_DIRS "${NUNAVUT_GENERATED_ROOT}/${NUNAVUT_LANG}/default")
+list(APPEND INCLUDE_DIRS "${CMAKE_SOURCE_DIR}/src")
 
 if(DEFINED ENV{NUNAVUT_LANG})
      message(STATUS "Getting NUNAVUT_LANG from the environment ($ENV{NUNAVUT_LANG})")
@@ -229,7 +232,7 @@ project(${PROJECT_NAME})
 
 if(BUILD_TESTS)
     include(${CMAKE_SOURCE_DIR}/cmake/utils.cmake)
-    apply_flag_set(${CMAKE_SOURCE_DIR}/cmake/compiler_flag_sets/native.cmake "" "" "")
+    apply_flag_set(${CMAKE_SOURCE_DIR}/cmake/compiler_flag_sets/native_w_cov.cmake "" "" "")
 
     # Compile at 32-bit
     SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -m32")
@@ -240,12 +243,82 @@ if(BUILD_TESTS)
       #"${CMAKE_SOURCE_DIR}/src/IO/register.c"
       "${CMAKE_SOURCE_DIR}/src/IO/flash.c"
     )
-    list(APPEND INCLUDE_DIRS "${CMAKE_SOURCE_DIR}/src")
-    list(APPEND INCLUDE_DIRS "${CMAKE_SOURCE_DIR}/tests/mocks/")
+
+    set(VERIFICATIONS_BINARY_DIR "${CMAKE_BINARY_DIR}/verifications")
+    file(MAKE_DIRECTORY ${VERIFICATIONS_BINARY_DIR})
+    set(UNITY_EXTRA_COMPILE_DEFS
+      UNITY_OUTPUT_COLOR
+      UNITY_POINTER_WIDTH=32
+    )
+    find_package(unity REQUIRED)
+    find_package(cmock REQUIRED)
+    find_package(lcov REQUIRED)
+    find_package(genhtml REQUIRED)
+
+    include(${CMAKE_SOURCE_DIR}/cmake/testing/unity.cmake)
+    include(${CMAKE_SOURCE_DIR}/cmake/testing/cmock.cmake)
+
+    generate_cmock_config("Stm32F4xx_HAL_Driver" "mock_" "stm32f4xx_hal.h;stm32f4xx_hal_def.h;stm32f4xx_hal_conf.h;stm32f4xx_hal_rcc_ex.h;stm32f4xx_hal_dma.h")
+    create_mocks( 
+      "Stm32F4xx_HAL_Driver"
+      "${CMAKE_SOURCE_DIR}/src/Drivers/STM32F4xx_HAL_Driver/Inc/"
+      "MOCK_HAL_DRIVER_DIR"
+      "MOCK_HAL_DRIVER_SRC"
+    )
+
+    set(USE_ONLY_HAL_DRIVER_SRC 
+      "stm32f4xx_hal.c"
+      "stm32f4xx_hal_flash.c"
+      "stm32f4xx_hal_flash_ex.c"
+    )
+
+    # List to hold filtered full paths
+    set(FILTERED_MOCK_HAL_DRIVER_SRC)
+
+    # Loop through the items in MOCK_HAL_DRIVER_SRC
+    foreach(FILE ${MOCK_HAL_DRIVER_SRC})
+        # Get the filename from the path
+        get_filename_component(FILENAME ${FILE} NAME)
+        
+        # Check if the filename ends with any of the specified substrings
+        foreach(SUBSTR ${USE_ONLY_HAL_DRIVER_SRC})
+            if(${FILENAME} MATCHES "${SUBSTR}$")
+                list(APPEND FILTERED_MOCK_HAL_DRIVER_SRC ${FILE})
+            endif()
+        endforeach()
+    endforeach()
+
+    # Output the filtered list of full paths
+    message(STATUS "Filtered mock HAL driver sources: ${FILTERED_MOCK_HAL_DRIVER_SRC}")
+
+    add_library(mock_hal_driver ${FILTERED_MOCK_HAL_DRIVER_SRC})
+    target_include_directories(mock_hal_driver PRIVATE 
+      ${MOCK_HAL_DRIVER_DIR}
+      ${CMOCK_INCLUDE_DIRS} 
+      "${CMAKE_SOURCE_DIR}/src/Drivers/STM32F4xx_HAL_Driver/Inc"
+      "${CMAKE_SOURCE_DIR}/src/Core/Inc"
+      "${CMAKE_SOURCE_DIR}/src/Drivers/CMSIS/Device/ST/STM32F4xx/Include"
+      "${CMAKE_SOURCE_DIR}/src/Drivers/CMSIS/Include/"
+    )
+    target_link_libraries(mock_hal_driver PRIVATE cmock_core)
+    target_compile_options(mock_hal_driver PRIVATE
+                          "-Wno-error"  # Third-party code is not our responsibility.
+                          "-Wno-switch-enum"
+                          "-Wno-missing-declarations"
+                          "-Wno-sign-conversion"
+                          "-Wno-double-promotion"
+                          "-Wno-float-equal"
+                          "-Wno-conversion"
+                          )
+    target_compile_definitions(mock_hal_driver PRIVATE STM32F446xx)
 
     add_library(io ${IO_SRC})
     target_include_directories(io PRIVATE ${INCLUDE_DIRS})
     add_dependencies(io dsdl-regulated dsdl-non-standard dsdl-mattfair nunavut-support)
+    target_compile_options(io PRIVATE
+      -Wno-error=missing-declarations
+      -Wno-error=unused-variable
+    )
 
     # TODO: work on removing these
     add_compile_options(
@@ -272,50 +345,118 @@ if(BUILD_TESTS)
          -Wno-error=missing-declarations
     )
 
-    #find_package(gtest REQUIRED)
-    #add_subdirectory(${GOOGLETEST_SUBMODULE})
-    #SET(GTEST_LIBRARIES gtest gmock)
-
-    set(TESTS OFF CACHE BOOL "Switch off CppUTest Test build")
-    add_subdirectory(${CMAKE_SOURCE_DIR}/submodules/cpputest)
-    set(CPPUTest_COMPILE_FLAGS -Wno-error=old-style-cast -Wno-error=sign-promo)
-    target_compile_options(CppUTest PRIVATE ${CPPUTest_COMPILE_FLAGS})
-    target_compile_options(CppUTestExt PRIVATE ${CPPUTest_COMPILE_FLAGS})
-
-    set(CPPUTest_LIBRARIES CppUTest CppUTestExt)
-    set(CPPUTest_INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/submodules/cpputest/include ${CMAKE_SOURCE_DIR}/submodules/cpputest/include/Platforms/Gcc)
-
     # Native test target
     enable_testing()
 
-    file(GLOB_RECURSE IO_TEST_SOURCES "tests/IO/*_test.cpp")
-    list(REMOVE_ITEM IO_TEST_SOURCES "${CMAKE_SOURCE_DIR}/tests/IO/register_test.cpp")
-
-    set(IO_MOCKS_SOURCES 
-      "${CMAKE_SOURCE_DIR}/tests/mocks/IO/mock_flash.cpp"
+    set(TEST_LIBRARIES cmock_core unity_core mock_hal_driver)
+    set(TEST_INCLUDE_DIRS 
+      ${CPPUTest_INCLUDE_DIRS} 
+      ${CMOCK_INCLUDE_DIRS} 
+      ${MOCK_HAL_DRIVER_DIR}
     )
 
-    add_executable(io_test_runner 
-      ${IO_TEST_SOURCES}
-      ${IO_MOCKS_SOURCES}
-      "${CMAKE_SOURCE_DIR}/tests/main.cpp"
-    )
-    target_include_directories(io_test_runner PRIVATE ${INCLUDE_DIRS} ${CPPUTest_INCLUDE_DIRS})
-    target_link_libraries(io_test_runner PRIVATE ${CPPUTest_LIBRARIES} ${DSDL_LIBRARIES} io)
-    add_dependencies(io_test_runner ${CPPUTest_LIBRARIES} ${DSDL_LIBRARIES} io)
-    target_compile_options(io_test_runner PRIVATE ${CPPUTest_COMPILE_FLAGS})
+    #file(GLOB_RECURSE MOCK_SOURCES "tests/mocks/IO/*.cpp")
+    #$add_library(mocks ${MOCK_SOURCES})
+    #target_include_directories(mocks PRIVATE ${INCLUDE_DIRS} ${CPPUTest_INCLUDE_DIRS})
 
-    add_test(NAME io COMMAND io_test_runner)
+    #file(GLOB_RECURSE IO_TEST_SOURCES "tests/IO/*_test.cpp")
+    #list(REMOVE_ITEM IO_TEST_SOURCES "${CMAKE_SOURCE_DIR}/tests/IO/register_test.cpp")
+
+    set(ALL_TESTS "")
+    set(ALL_TESTS_WITH_LCOV "")
+    set(ALL_TEST_COVERAGE "")
+
+    create_test(mock_hal_test tests/mocks/hal_test.c mock_hal_driver)
+    target_include_directories(mock_hal_test PRIVATE 
+      ${INCLUDE_DIRS} 
+      ${TEST_INCLUDE_DIRS}
+    )
+
+    create_test(io_flash_test tests/IO/flash_test.c io mock_hal_driver)
+    target_include_directories(io_flash_test PRIVATE 
+      ${INCLUDE_DIRS} 
+      ${TEST_INCLUDE_DIRS}
+    )
+    set(NATIVE_TEST_NAME io_flash_test)
+    define_native_test_run_with_lcov(${NATIVE_TEST_NAME} ${VERIFICATIONS_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/\\*)
+    define_natve_test_coverage(${NATIVE_TEST_NAME} ${VERIFICATIONS_BINARY_DIR})
+    list(APPEND ALL_TESTS "run_${NATIVE_TEST_NAME}")
+    list(APPEND ALL_TESTS_WITH_LCOV "run_${NATIVE_TEST_NAME}_with_lcov")
+    list(APPEND ALL_TEST_COVERAGE "--add-tracefile")
+    list(APPEND ALL_TEST_COVERAGE "${VERIFICATIONS_BINARY_DIR}/coverage.${NATIVE_TEST_NAME}.filtered.info")
+    set(ALL_TESTS ${ALL_TESTS} PARENT_SCOPE)
+    set(ALL_TESTS_WITH_LCOV ${ALL_TESTS_WITH_LCOV} PARENT_SCOPE)
+    set(ALL_TEST_COVERAGE ${ALL_TEST_COVERAGE} PARENT_SCOPE)
 
     # Custom target to run all tests with ctest --output-on-failure
     add_custom_target(run_tests
         COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure
-        DEPENDS io_test_runner
+        DEPENDS mock_hal_test
+        DEPENDS io_flash_test
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
         COMMENT "Running tests with verbose output on failure"
     )
+
+    get_filename_component(NUNAVUT_PROJECT_ROOT "${CMAKE_SOURCE_DIR}" REALPATH BASE_DIR "${CMAKE_BINARY_DIR}")
+    
+    add_custom_target(
+        lcov_zero
+        ${LCOV}
+              ${GOV_TOOL_ARG}
+              --zerocounters
+              --directory ${CMAKE_CURRENT_BINARY_DIR}
+        COMMENT "Resetting coverage counters."
+    )
+
+
+    add_custom_command(
+        OUTPUT ${VERIFICATIONS_BINARY_DIR}/coverage.all.info
+        COMMAND
+              ${LCOV}
+                  ${GOV_TOOL_ARG}
+                  --rc lcov_branch_coverage=1
+                  ${ALL_TEST_COVERAGE}
+                  --output-file ${VERIFICATIONS_BINARY_DIR}/coverage.all.info
+        DEPENDS ${ALL_TESTS_WITH_LCOV}
+    )
+
+    add_custom_command(
+        OUTPUT ${VERIFICATIONS_BINARY_DIR}/coverage.info
+        COMMAND
+              ${LCOV}
+                  ${GOV_TOOL_ARG}
+                  --rc lcov_branch_coverage=1
+                  --extract ${VERIFICATIONS_BINARY_DIR}/coverage.all.info
+                            ${PROJECT_ROOT}/\\*
+                  --output-file ${VERIFICATIONS_BINARY_DIR}/coverage.info
+        DEPENDS ${VERIFICATIONS_BINARY_DIR}/coverage.all.info
+    )
+
+    add_custom_target(
+        cov_info
+        DEPENDS ${VERIFICATIONS_BINARY_DIR}/coverage.info
+    )
+
+    add_custom_target(
+        cov_all
+        ${GENHTML} --title "${PROJECT_NAME} native test coverage"
+              --output-directory ${VERIFICATIONS_BINARY_DIR}/coverage/all
+              --demangle-cpp
+              --sort
+              --num-spaces 4
+              --function-coverage
+              --branch-coverage
+              --legend
+              --highlight
+              --show-details
+              ${VERIFICATIONS_BINARY_DIR}/coverage.info
+        DEPENDS ${VERIFICATIONS_BINARY_DIR}/coverage.info
+        COMMENT "Build and run all tests and generate an overall html coverage report."
+    )
+
 else()
     # Cross compile for ARM
+    apply_flag_set(${CMAKE_SOURCE_DIR}/cmake/compiler_flag_sets/native.cmake "" "" "")
 
     include_directories (${INCLUDE_DIRS})
     enable_language(ASM)

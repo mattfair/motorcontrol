@@ -1,0 +1,4 @@
+:cmock:
+  :mock_prefix: mock_
+  :mock_path: "tests/mocks/Drivers/STM32F4xx_HAL_Driver"
+  :includes: ["src/Drivers/STM32F4xx_HAL_Driver/Inc"]
