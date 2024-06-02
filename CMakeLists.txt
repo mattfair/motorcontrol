@@ -14,8 +14,6 @@ cmake_minimum_required(VERSION 3.20)
 include(${CMAKE_SOURCE_DIR}/cmake/utils.cmake)
 set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake/modules")
 
-#find_package(lcov REQUIRED)
-#find_package(genhtml REQUIRED)
 find_package(nnvg REQUIRED)
 
 ###################### CONSTANTS ######################################
@@ -234,7 +232,7 @@ project(${PROJECT_NAME})
 
 if(BUILD_TESTS)
     include(${CMAKE_SOURCE_DIR}/cmake/utils.cmake)
-    apply_flag_set(${CMAKE_SOURCE_DIR}/cmake/compiler_flag_sets/native.cmake "" "" "")
+    apply_flag_set(${CMAKE_SOURCE_DIR}/cmake/compiler_flag_sets/native_w_cov.cmake "" "" "")
 
     # Compile at 32-bit
     SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -m32")
@@ -364,6 +362,10 @@ if(BUILD_TESTS)
     #file(GLOB_RECURSE IO_TEST_SOURCES "tests/IO/*_test.cpp")
     #list(REMOVE_ITEM IO_TEST_SOURCES "${CMAKE_SOURCE_DIR}/tests/IO/register_test.cpp")
 
+    set(ALL_TESTS "")
+    set(ALL_TESTS_WITH_LCOV "")
+    set(ALL_TEST_COVERAGE "")
+
     create_test(io_hal_test tests/IO/hal_test.c mock_hal_driver)
     target_include_directories(io_hal_test PRIVATE 
       ${INCLUDE_DIRS} 
@@ -375,8 +377,16 @@ if(BUILD_TESTS)
       ${INCLUDE_DIRS} 
       ${TEST_INCLUDE_DIRS}
     )
-    define_native_test_run_with_lcov("io_flash_test" ${VERIFICATIONS_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/\\*)
-    define_natve_test_coverage("io_flash_test" ${VERIFICATIONS_BINARY_DIR})
+    set(NATIVE_TEST_NAME io_flash_test)
+    define_native_test_run_with_lcov(${NATIVE_TEST_NAME} ${VERIFICATIONS_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/\\*)
+    define_natve_test_coverage(${NATIVE_TEST_NAME} ${VERIFICATIONS_BINARY_DIR})
+    list(APPEND ALL_TESTS "run_${NATIVE_TEST_NAME}")
+    list(APPEND ALL_TESTS_WITH_LCOV "run_${NATIVE_TEST_NAME}_with_lcov")
+    list(APPEND ALL_TEST_COVERAGE "--add-tracefile")
+    list(APPEND ALL_TEST_COVERAGE "${VERIFICATIONS_BINARY_DIR}/coverage.${NATIVE_TEST_NAME}.filtered.info")
+    set(ALL_TESTS ${ALL_TESTS} PARENT_SCOPE)
+    set(ALL_TESTS_WITH_LCOV ${ALL_TESTS_WITH_LCOV} PARENT_SCOPE)
+    set(ALL_TEST_COVERAGE ${ALL_TEST_COVERAGE} PARENT_SCOPE)
 
     # Custom target to run all tests with ctest --output-on-failure
     add_custom_target(run_tests
@@ -386,8 +396,67 @@ if(BUILD_TESTS)
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
         COMMENT "Running tests with verbose output on failure"
     )
+
+    get_filename_component(NUNAVUT_PROJECT_ROOT "${CMAKE_SOURCE_DIR}" REALPATH BASE_DIR "${CMAKE_BINARY_DIR}")
+    
+    add_custom_target(
+        lcov_zero
+        ${LCOV}
+              ${GOV_TOOL_ARG}
+              --zerocounters
+              --directory ${CMAKE_CURRENT_BINARY_DIR}
+        COMMENT "Resetting coverage counters."
+    )
+
+
+    add_custom_command(
+        OUTPUT ${VERIFICATIONS_BINARY_DIR}/coverage.all.info
+        COMMAND
+              ${LCOV}
+                  ${GOV_TOOL_ARG}
+                  --rc lcov_branch_coverage=1
+                  ${ALL_TEST_COVERAGE}
+                  --output-file ${VERIFICATIONS_BINARY_DIR}/coverage.all.info
+        DEPENDS ${ALL_TESTS_WITH_LCOV}
+    )
+
+    add_custom_command(
+        OUTPUT ${VERIFICATIONS_BINARY_DIR}/coverage.info
+        COMMAND
+              ${LCOV}
+                  ${GOV_TOOL_ARG}
+                  --rc lcov_branch_coverage=1
+                  --extract ${VERIFICATIONS_BINARY_DIR}/coverage.all.info
+                            ${PROJECT_ROOT}/\\*
+                  --output-file ${VERIFICATIONS_BINARY_DIR}/coverage.info
+        DEPENDS ${VERIFICATIONS_BINARY_DIR}/coverage.all.info
+    )
+
+    add_custom_target(
+        cov_info
+        DEPENDS ${VERIFICATIONS_BINARY_DIR}/coverage.info
+    )
+
+    add_custom_target(
+        cov_all
+        ${GENHTML} --title "${PROJECT_NAME} native test coverage"
+              --output-directory ${VERIFICATIONS_BINARY_DIR}/coverage/all
+              --demangle-cpp
+              --sort
+              --num-spaces 4
+              --function-coverage
+              --branch-coverage
+              --legend
+              --highlight
+              --show-details
+              ${VERIFICATIONS_BINARY_DIR}/coverage.info
+        DEPENDS ${VERIFICATIONS_BINARY_DIR}/coverage.info
+        COMMENT "Build and run all tests and generate an overall html coverage report."
+    )
+
 else()
     # Cross compile for ARM
+    apply_flag_set(${CMAKE_SOURCE_DIR}/cmake/compiler_flag_sets/native.cmake "" "" "")
 
     include_directories (${INCLUDE_DIRS})
     enable_language(ASM)

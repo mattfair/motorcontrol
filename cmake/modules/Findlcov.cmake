@@ -78,7 +78,7 @@ if(LCOV)
                         --directory ${CMAKE_CURRENT_BINARY_DIR}
                         --output-file ${VERIFICATIONS_BINARY_DIR}/coverage.baseline.info
             COMMAND
-                ${ARG_OUTDIR}/${ARG_TEST_NAME}
+                ${ARG_TEST_NAME}
             COMMAND # Generate coverage from tests.
                 ${LCOV}
                         ${GOV_TOOL_ARG}
