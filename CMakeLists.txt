@@ -366,8 +366,8 @@ if(BUILD_TESTS)
     set(ALL_TESTS_WITH_LCOV "")
     set(ALL_TEST_COVERAGE "")
 
-    create_test(io_hal_test tests/IO/hal_test.c mock_hal_driver)
-    target_include_directories(io_hal_test PRIVATE 
+    create_test(mock_hal_test tests/mocks/hal_test.c mock_hal_driver)
+    target_include_directories(mock_hal_test PRIVATE 
       ${INCLUDE_DIRS} 
       ${TEST_INCLUDE_DIRS}
     )
@@ -391,7 +391,7 @@ if(BUILD_TESTS)
     # Custom target to run all tests with ctest --output-on-failure
     add_custom_target(run_tests
         COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure
-        DEPENDS io_hal_test
+        DEPENDS mock_hal_test
         DEPENDS io_flash_test
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
         COMMENT "Running tests with verbose output on failure"

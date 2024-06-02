@@ -103,11 +103,6 @@ FlashStatus flash_write( void* data, uint32_t address, size_t size )
         return FLASH_ERROR;
     }
 
-    if( HAL_FLASH_Unlock() != HAL_OK )
-    {
-        return FLASH_ERROR;
-    }
-
     const uint8_t* data_ptr = (const uint8_t*)data;
     for ( size_t i = 0; i < size; i++ )
     {

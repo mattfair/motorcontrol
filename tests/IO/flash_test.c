@@ -196,25 +196,12 @@ void test_flash_read( uint32_t offset)
     TEST_ASSERT_EQUAL(FLASH_OK, flash_read(&data, address, 4));
 }
 
-void test_flash_write_fail_to_unlock( void )
-{
-    uint8_t data[4] = { 0x01, 0x02, 0x03, 0x04 };
-    size_t size = sizeof( data );
-    uint32_t address = flash_get_addr();
-
-    HAL_FLASH_Unlock_ExpectAndReturn( HAL_ERROR );
-    TEST_ASSERT_EQUAL( FLASH_ERROR, flash_write( &data, address, size ) );
-}
-
 TEST_CASE( 0 )
 TEST_CASE( 1 )
 TEST_CASE( 2 )
 TEST_CASE( 3 )
 void test_flash_write_with_error( uint16_t failOnByte )
 {
-    // we can unlock the memory, bu there is another error that occurs
-    HAL_FLASH_Unlock_ExpectAndReturn( HAL_OK );
-
     uint8_t data[4] = { 0x01, 0x02, 0x03, 0x04 };
     size_t size = sizeof( data );
     uint32_t address = flash_get_addr();
@@ -247,8 +234,6 @@ void test_flash_write_with_error( uint16_t failOnByte )
 
 void test_flash_success( void )
 {
-    HAL_FLASH_Unlock_ExpectAndReturn( HAL_OK );
-
     uint8_t data[4] = { 0x01, 0x02, 0x03, 0x04 };
     size_t size = sizeof( data );
     uint32_t address = flash_get_addr();
@@ -276,4 +261,3 @@ void test_flash_write_out_of_bounds_end_should_fail( void )
     size_t size = flash_get_size();
     TEST_ASSERT_EQUAL( FLASH_ERROR, flash_write( &data, address + size, 4 ) );
 }
-
