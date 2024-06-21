@@ -5,25 +5,152 @@
  *
  * Copyright (c) 2024 Matt Fair
  */
-#include "register.h"
+#include "IO/register.h"
+#include <stdio.h>
+#include "IO/flash.h"
 
-static bool register_is_initialized = false;
 static uint32_t register_start_addr = 0;
 static uint32_t register_end_addr = 0;
-static uint16_t register_size = 0;
+static size_t memory_size = 0;
+static size_t register_size = 0;
+static size_t register_count = 0;
+static uavcan_register_Name_1_0* registerNames;
+static uint16_t registerNamesCount = 0;
+static uint8_t serializeBuffer[mattfair_storage_Register_1_0_SERIALIZATION_BUFFER_SIZE_BYTES_] = { 0 };
 
-void RegisterInit(uint32_t start_addr, uint32_t end_addr)
+uint32_t GetOffsetAddress( uint32_t index );
+int32_t FindRegisterIndex( const char* name );
+
+void RegisterInit( uint32_t start_addr, size_t count )
 {
-  register_start_addr = start_addr;
-  register_end_addr = end_addr;
-  register_is_initialized = true;
-  register_size = (uint16_t)(end_addr - start_addr + 1);
+    register_start_addr = start_addr;
+    register_size = mattfair_storage_Register_1_0_SERIALIZATION_BUFFER_SIZE_BYTES_;
+    memory_size = register_size * count;
+    register_end_addr = start_addr + count * register_size;
+    register_count = 0;
+    registerNamesCount = 0;
+    registerNames =
+        (uavcan_register_Name_1_0*)malloc( count * uavcan_register_Name_1_0_SERIALIZATION_BUFFER_SIZE_BYTES_ );
+    flash_init( start_addr, memory_size );
 }
 
-bool RegisterIsInitialized() { return register_is_initialized; }
+void RegisterDestroy()
+{
+    register_start_addr = 0;
+    register_end_addr = 0;
+    register_size = 0;
+    register_count = 0;
+    free( registerNames );
+    flash_destroy();
+}
 
-uint32_t RegisterGetStart() { return register_start_addr; }
-uint32_t RegisterGetEnd() { return register_end_addr; }
+uint32_t RegisterStartAddress()
+{
+    return register_start_addr;
+}
+uint32_t RegisterEndAddress()
+{
+    return register_end_addr;
+}
+
+size_t RegisterSize()
+{
+    return register_size;
+}
+
+size_t RegisterCount()
+{
+    return register_count;
+}
+
+bool RegisterWrite( const char* name, const uavcan_register_Value_1_0* value )
+{
+    uavcan_register_Name_1_0* storedName = &registerNames[registerNamesCount++];
+    uavcan_register_Name_1_0_initialize_( storedName );
+    storedName->name.count = strlen( name );
+    memset( storedName->name.elements, 0, sizeof( storedName->name.elements ) );
+    memcpy( storedName->name.elements, name, storedName->name.count );
+
+    FlashRegister reg =
+    {
+      .name = *storedName,
+      .value = *value,
+      .isImmutable = false
+    };
+
+    size_t size = sizeof( reg );
+    memset( serializeBuffer, 0, size);
+    if ( mattfair_storage_Register_1_0_serialize_( &reg, serializeBuffer, &size ) != NUNAVUT_SUCCESS )
+    {
+        return false;
+    }
+
+    if ( flash_write( serializeBuffer, GetOffsetAddress( register_count ), RegisterSize() ) == FLASH_ERROR )
+    {
+        return false;
+    }
+
+    register_count++;
+    return true;
+}
+
+int32_t FindRegisterIndex( const char* name )
+{
+    if ( registerNamesCount == 0 )
+    {
+        return -1;
+    }
+
+    for ( int i = 0; i < registerNamesCount; i++ )
+    {
+        uavcan_register_Name_1_0* regName = &registerNames[i];
+        if ( strncmp( (const char*)regName->name.elements, name, regName->name.count ) == 0 )
+        {
+            //printf( "Found Name: %s, Index: %d\r\n", name, i );
+            return i;
+        }
+    }
+
+    return -1;  // Not found
+}
+
+int8_t DeserializeFlashRegister( void* const out_obj, const uint8_t* buffer, size_t* const inout_buffer_size_bytes )
+{
+    return mattfair_storage_Register_1_0_deserialize_( out_obj, buffer, inout_buffer_size_bytes );
+}
+
+bool RegisterRead( const char* name, FlashRegister* regOut )
+{
+    int32_t index = FindRegisterIndex( name );
+    if ( index == -1 )
+    {
+        return false;
+    }
+
+    if ( flash_read( regOut, GetOffsetAddress( (uint32_t)index ), RegisterSize(), DeserializeFlashRegister ) ==
+         FLASH_ERROR )
+    {
+        return false;
+    }
+
+    return true;
+}
+
+uavcan_register_Name_1_0 RegisterNameByIndex( const uint16_t index )
+{
+    if ( index >= registerNamesCount )
+    {
+        uavcan_register_Name_1_0 empty = { 0 };
+        return empty;
+    }
+
+    return registerNames[index];
+}
+
+uint32_t GetOffsetAddress( uint32_t index )
+{
+    return register_start_addr + index * register_size;
+}
 
 #if 0
 #include <assert.h>
@@ -34,8 +161,8 @@ uint32_t RegisterGetEnd() { return register_end_addr; }
 
 #include "flash.h"
 
-#define PASTE3_IMPL(x, y, z) x##y##z
-#define PASTE3(x, y, z) PASTE3_IMPL(x, y, z)
+#define PASTE3_IMPL( x, y, z ) x##y##z
+#define PASTE3( x, y, z ) PASTE3_IMPL( x, y, z )
 
 #define FLASH_USER_SECTOR FLASH_SECTOR_7
 
@@ -98,28 +225,6 @@ int deserializeRegister(Register *reg, const uint8_t *buffer, size_t buffer_size
   size_consumed += buffer_size;
 
   return size_consumed; // Return the total size consumed from the buffer
-}
-
-int findRegisterIndex(const char *name)
-{
-  printf("Finding register index for %s\r\n", name);
-
-  if (validRegisterCount == 0)
-  {
-    return -1;
-  }
-
-  for (int i = 0; i < validRegisterCount; i++)
-  {
-    uavcan_register_Name_1_0 *regName = &registerNames[i];
-    if (strncmp(regName->name.elements, name, regName->name.count) == 0)
-    {
-      printf("Found Name: %s, Index: %d\r\n", name, i);
-      return i;
-    }
-  }
-
-  return -1; // Not found
 }
 
 // Function to calculate the address for a given register index
@@ -290,15 +395,16 @@ bool RegisterAssign(uavcan_register_Value_1_0 *const dst, const uavcan_register_
     return true;
   }
   // This is a violation of MISRA/AUTOSAR but it is believed to be less error-prone than manually copy-pasted code.
-#define REGISTER_CASE_SAME_TYPE(TYPE)                                                                             \
-  if (PASTE3(uavcan_register_Value_1_0_is_, TYPE, _)(dst) && PASTE3(uavcan_register_Value_1_0_is_, TYPE, _)(src)) \
-  {                                                                                                               \
-    for (size_t i = 0; i < nunavutChooseMin(dst->TYPE.value.count, src->TYPE.value.count); ++i)                   \
-    {                                                                                                             \
-      dst->TYPE.value.elements[i] = src->TYPE.value.elements[i];                                                  \
-    }                                                                                                             \
-    return true;                                                                                                  \
-  }
+#define REGISTER_CASE_SAME_TYPE( TYPE )                                                                 \
+    if ( PASTE3( uavcan_register_Value_1_0_is_, TYPE, _ )( dst ) &&                                     \
+         PASTE3( uavcan_register_Value_1_0_is_, TYPE, _ )( src ) )                                      \
+    {                                                                                                   \
+        for ( size_t i = 0; i < nunavutChooseMin( dst->TYPE.value.count, src->TYPE.value.count ); ++i ) \
+        {                                                                                               \
+            dst->TYPE.value.elements[i] = src->TYPE.value.elements[i];                                  \
+        }                                                                                               \
+        return true;                                                                                    \
+    }
   REGISTER_CASE_SAME_TYPE(integer64)
   REGISTER_CASE_SAME_TYPE(integer32)
   REGISTER_CASE_SAME_TYPE(integer16)

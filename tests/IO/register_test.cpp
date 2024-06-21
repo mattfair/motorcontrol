@@ -1,5 +1,5 @@
-#include <gtest/gtest.h>
 #include <IO/register.h>
+#include <unity.h>
 
 /**
  * Specify the address and size for the register memory
@@ -15,4 +15,15 @@ void setup(void)
 {
 }
 
+void teardown(void)
+{
+}
 
+void test_RegisterInit(void)
+{
+    RegisterInit(0x080000, 1000);
+
+    uintptr_t address = (uintptr_t)0x080000;
+    TEST_ASSERT_EQUAL(address, RegisterGetStartAddress());
+    TEST_ASSERT_EQUAL(50, RegisterCount());
+}

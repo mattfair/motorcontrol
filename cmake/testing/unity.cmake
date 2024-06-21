@@ -7,6 +7,7 @@ function(create_test test_name test_src)
 :unity:
   :enforce_strict_ordering: true
   :use_param_tests: true
+  :cmdline_args: true
 ")
   set (CONFIG_FILE ${TEST_RUNNERS_DIR}/unity_config.yml)
   file(WRITE ${CONFIG_FILE} "${CONFIG_CONTENT}")

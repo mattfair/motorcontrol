@@ -1,5 +1,6 @@
 #include <IO/flash.h>
 #include <IO/hal.h>
+#include <stdio.h>
 #include <string.h>
 
 void flash_clear_flags_impl( void );
@@ -82,7 +83,7 @@ FlashStatus flash_unlock( void )
     }
 }
 
-FlashStatus flash_read( void* data, uint32_t address, size_t size )
+FlashStatus flash_read( void* data, uint32_t address, size_t size, DeSerializeFunctionPointer deserialize )
 {
     // Ensure the address is within the bounds of the flash memory
     if ( address < state.start_addr || address + size > state.end_addr )
@@ -90,8 +91,15 @@ FlashStatus flash_read( void* data, uint32_t address, size_t size )
         return FLASH_ERROR;
     }
 
-    // Copy the data from the flash memory to the provided buffer
-    memcpy( data, (const void*)address, size );
+    if ( deserialize )
+    {
+        void* source = (void*)address;
+        deserialize( data, source, &size );
+    }
+    else
+    {
+        memcpy( data, (void*)address, size );
+    }
 
     return FLASH_OK;
 }
@@ -106,6 +114,7 @@ FlashStatus flash_write( void* data, uint32_t address, size_t size )
     const uint8_t* data_ptr = (const uint8_t*)data;
     for ( size_t i = 0; i < size; i++ )
     {
+        //printf( "data_ptr[%d]: %d\n", i, data_ptr[i] );
         if ( HAL_FLASH_Program( FLASH_TYPEPROGRAM_BYTE, address + i, data_ptr[i] ) != HAL_OK )
         {
             return FLASH_ERROR;

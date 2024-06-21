@@ -240,7 +240,7 @@ if(BUILD_TESTS)
     SET(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -m32")
 
     set(IO_SRC 
-      #"${CMAKE_SOURCE_DIR}/src/IO/register.c"
+      "${CMAKE_SOURCE_DIR}/src/IO/register.c"
       "${CMAKE_SOURCE_DIR}/src/IO/flash.c"
     )
 
@@ -318,6 +318,7 @@ if(BUILD_TESTS)
     target_compile_options(io PRIVATE
       -Wno-error=missing-declarations
       -Wno-error=unused-variable
+      -Wno-error=unused-parameter
     )
 
     # TODO: work on removing these
@@ -372,27 +373,46 @@ if(BUILD_TESTS)
       ${TEST_INCLUDE_DIRS}
     )
 
-    create_test(io_flash_test tests/IO/flash_test.c io mock_hal_driver)
-    target_include_directories(io_flash_test PRIVATE 
-      ${INCLUDE_DIRS} 
-      ${TEST_INCLUDE_DIRS}
+    function(create_test_with_coverage TEST_NAME TEST_SOURCE TEST_TARGET DEPENDENCIES)
+        # Create the test
+        create_test(${TEST_NAME} ${TEST_SOURCE} ${TEST_TARGET} ${DEPENDENCIES})
+        target_include_directories(${TEST_NAME} PRIVATE 
+          ${INCLUDE_DIRS} 
+          ${TEST_INCLUDE_DIRS}
+        )
+
+        # Define native test run with lcov
+        define_native_test_run_with_lcov(${TEST_NAME} ${VERIFICATIONS_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/\\*)
+        define_native_test_coverage(${TEST_NAME} ${VERIFICATIONS_BINARY_DIR})
+
+        # Append to lists
+        list(APPEND ALL_TESTS "run_${TEST_NAME}")
+        list(APPEND ALL_TESTS_WITH_LCOV "run_${TEST_NAME}_with_lcov")
+        list(APPEND ALL_TEST_COVERAGE "--add-tracefile")
+        list(APPEND ALL_TEST_COVERAGE "${VERIFICATIONS_BINARY_DIR}/coverage.${TEST_NAME}.filtered.info")
+
+        # Update lists
+        set(ALL_TESTS ${ALL_TESTS} PARENT_SCOPE)
+        set(ALL_TESTS_WITH_LCOV ${ALL_TESTS_WITH_LCOV} PARENT_SCOPE)
+        set(ALL_TEST_COVERAGE ${ALL_TEST_COVERAGE} PARENT_SCOPE)
+    endfunction()
+
+
+    add_definitions(
+      -DCMOCK_MEM_STATIC
+      -DCMOCK_MEM_SIZE=131072
+      -DCMOCK_MEM_ALIGN=2
     )
-    set(NATIVE_TEST_NAME io_flash_test)
-    define_native_test_run_with_lcov(${NATIVE_TEST_NAME} ${VERIFICATIONS_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/\\*)
-    define_natve_test_coverage(${NATIVE_TEST_NAME} ${VERIFICATIONS_BINARY_DIR})
-    list(APPEND ALL_TESTS "run_${NATIVE_TEST_NAME}")
-    list(APPEND ALL_TESTS_WITH_LCOV "run_${NATIVE_TEST_NAME}_with_lcov")
-    list(APPEND ALL_TEST_COVERAGE "--add-tracefile")
-    list(APPEND ALL_TEST_COVERAGE "${VERIFICATIONS_BINARY_DIR}/coverage.${NATIVE_TEST_NAME}.filtered.info")
-    set(ALL_TESTS ${ALL_TESTS})
-    set(ALL_TESTS_WITH_LCOV ${ALL_TESTS_WITH_LCOV})
-    set(ALL_TEST_COVERAGE ${ALL_TEST_COVERAGE})
+
+    create_test_with_coverage(io_flash_test tests/IO/flash_test.c io mock_hal_driver)
+    create_test_with_coverage(io_register_test tests/IO/register_test.c io mock_hal_driver)
 
     # Custom target to run all tests with ctest --output-on-failure
     add_custom_target(run_tests
         COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure
         DEPENDS mock_hal_test
         DEPENDS io_flash_test
+        DEPENDS io_register_test
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
         COMMENT "Running tests with verbose output on failure"
     )

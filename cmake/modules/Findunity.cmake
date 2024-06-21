@@ -29,7 +29,9 @@ target_compile_options(unity_core PUBLIC
                         "-Wno-double-promotion"
                         "-Wno-switch-enum"
                         "-Wno-conversion"
+                        "-Wno-missing-declarations"
                         "-DUNITY_INCLUDE_DOUBLE"
+                        "-DUNITY_USE_COMMAND_LINE_ARGS"
                         "${UNITY_EXTRA_COMPILE_CFLAGS}"
                        )
 target_compile_definitions(unity_core PUBLIC

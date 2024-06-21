@@ -7,6 +7,7 @@
  */
 #pragma once
 
+#include <mattfair/storage/Register_1_0.h>
 #include <string.h>
 #include <uavcan/_register/Access_1_0.h>
 #include <uavcan/_register/List_1_0.h>
@@ -34,19 +35,86 @@
  */
 
 #ifdef __cplusplus
- extern "C" {
+extern "C"
+{
 #endif
+    typedef mattfair_storage_Register_1_0 FlashRegister;
 
-void RegisterInit(uint32_t start_addr, uint32_t end_addr);
-bool RegisterIsInitialized();
-uint32_t RegisterGetStart();
-uint32_t RegisterGetEnd();
-uint16_t RegisterCount();
+    /**
+     * @brief Initialize the registers in memory
+     * @param start_addr start address of the registers
+     * @param count number of registers
+     */
+    void RegisterInit( uint32_t start_addr, size_t count );
+
+    /**
+     * @brief Destroy the registers in memory
+     */
+    void RegisterDestroy();
+
+    /**
+     * @brief Get the start address of the registers
+     * @return start address of the registers
+     */
+    uint32_t RegisterStartAddress();
+
+    /**
+     * @brief Get the end address of the registers
+     * @return end address of the registers
+     */
+    uint32_t RegisterEndAddress();
+
+    /**
+     * @brief Get the size of a single stored registers
+     * @return size of a register
+     */
+    size_t RegisterSize();
+
+    /**
+     * @brief Get the current number of registers stored
+     * @return number of registers
+     */
+    size_t RegisterCount();
+
+    /**
+     * @brief Store the given register value into the persistent storage.
+     *
+     * @param name name of the registry value
+     * @param value pointer to the value
+     * @return true if successful
+     * @return false if failed
+     */
+    bool RegisterWrite( const char* name, const uavcan_register_Value_1_0* value );
+
+    /**
+     * @brief  This function is mostly intended for implementing the standard RPC-service uavcan.register.List. It
+     * returns the name of the register at the specified index (where the ordering is undefined but guaranteed to be
+     * short-term stable), or empty name if the index is out of bounds.
+     *
+     * @param index index of the register
+     * @return name of the register
+     * @return empty name if the index is out of bounds
+     */
+    uavcan_register_Name_1_0 RegisterNameByIndex( const uint16_t index );
+
+    /**
+     * @brief Read a register stored by name
+     * @param name name of the register
+     * @param regOut pointer to return the register read
+     * @return true if successful
+     */
+    bool RegisterRead( const char* name, FlashRegister* regOut );
+
+
+    /**
+     * @brief Get the offset address of the register
+     * @param index index of the register
+     */
+    uint32_t GetOffsetAddress( uint32_t index );
 
 #ifdef __cplusplus
- }
+}
 #endif
-
 
 #if 0
 /**
@@ -69,16 +137,6 @@ void RegisterInit(uint32_t start_addr, uint32_t end_addr);
 bool RegisterRead(const char* name, uavcan_register_Value_1_0* value);
 
 /**
- * @brief Store the given register value into the persistent storage.
- *
- * @param name name of the registry value
- * @param value pointer to the value
- * @return true if successful
- * @return false if failed
- */
-bool RegisterWrite(const char* name, const uavcan_register_Value_1_0* value);
-
-/**
  * @brief Store the given register value into the persistent storage and mark it as immutable.
  *
  * @param name name of the registry value
@@ -99,16 +157,6 @@ bool RegisterImutableWrite(const char* name, const uavcan_register_Value_1_0* va
  * @return false if failed
  */
 bool RegisterAssign(uavcan_register_Value_1_0* const dst, const uavcan_register_Value_1_0* const src);
-
-/**
- * @brief  This function is mostly intended for implementing the standard RPC-service uavcan.register.List. It returns the name of the register at the
- * specified index (where the ordering is undefined but guaranteed to be short-term stable), or empty name if the index is out of bounds.
- *
- * @param index index of the register
- * @return name of the register
- * @return empty name if the index is out of bounds
- */
-uavcan_register_Name_1_0 RegisterGetNameByIndex(const uint16_t index);
 
 /**
  * @brief Erase all registers such that the defaults are used at the next launch.

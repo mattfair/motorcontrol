@@ -47,7 +47,9 @@ function(generate_cmock_config NAME MOCK_PREFIX INCLUDES)
   :mock_path: ${CMAKE_BINARY_DIR}/generated/mocks/${NAME}
   :enforce_strict_ordering: true
   :plugins:
+    - callback
     - ignore
+    - ignore_arg
 ")
     # Check if INCLUDES is not empty
     if(INCLUDES)
