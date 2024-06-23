@@ -78,13 +78,13 @@ extern "C"
 
     /**
      * @brief Store the given register value into the persistent storage.
-     *
      * @param name name of the registry value
      * @param value pointer to the value
+     * @param immutable if the register is immutable
      * @return true if successful
      * @return false if failed
      */
-    bool RegisterWrite( const char* name, const uavcan_register_Value_1_0* value );
+    bool RegisterWrite( const char* name, const uavcan_register_Value_1_0* value, bool immutable );
 
     /**
      * @brief  This function is mostly intended for implementing the standard RPC-service uavcan.register.List. It
@@ -93,7 +93,7 @@ extern "C"
      *
      * @param index index of the register
      * @return name of the register
-     * @return empty name if the index is out of bounds
+     * @return empty name if the index is out of bonds
      */
     uavcan_register_Name_1_0 RegisterNameByIndex( const uint16_t index );
 
@@ -105,12 +105,24 @@ extern "C"
      */
     bool RegisterRead( const char* name, FlashRegister* regOut );
 
+    /**
+     * @brief Read a register stored by index
+     * @param index index of the register
+     * @param regOut pointer to return the register read
+     * @return true if successful
+     */
+    bool RegisterReadByIndex( uint32_t index, FlashRegister* regOut );
 
     /**
      * @brief Get the offset address of the register
      * @param index index of the register
      */
     uint32_t GetOffsetAddress( uint32_t index );
+
+    /**
+     * @brief Erase all registers such that the defaults are used at the next launch.
+     */
+    void RegisterFactoryReset( void );
 
 #ifdef __cplusplus
 }

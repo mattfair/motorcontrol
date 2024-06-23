@@ -14,12 +14,25 @@ static uint32_t register_end_addr = 0;
 static size_t memory_size = 0;
 static size_t register_size = 0;
 static size_t register_count = 0;
+static size_t max_register_count = 0;
 static uavcan_register_Name_1_0* registerNames;
-static uint16_t registerNamesCount = 0;
+static bool* registerImmutable;
 static uint8_t serializeBuffer[mattfair_storage_Register_1_0_SERIALIZATION_BUFFER_SIZE_BYTES_] = { 0 };
 
+typedef struct RegisterIndex
+{
+    uint32_t value;
+    enum
+    {
+        VALID = 0,
+        REGISTER_NOT_FOUND
+    } status;
+} RegisterIndex;
+
 uint32_t GetOffsetAddress( uint32_t index );
-int32_t FindRegisterIndex( const char* name );
+RegisterIndex FindRegisterIndex( const char* name );
+bool Write( const char* name, const uavcan_register_Value_1_0* value, bool immutable );
+void ReadRegisters();
 
 void RegisterInit( uint32_t start_addr, size_t count )
 {
@@ -28,20 +41,49 @@ void RegisterInit( uint32_t start_addr, size_t count )
     memory_size = register_size * count;
     register_end_addr = start_addr + count * register_size;
     register_count = 0;
-    registerNamesCount = 0;
+    max_register_count = count;
     registerNames =
         (uavcan_register_Name_1_0*)malloc( count * uavcan_register_Name_1_0_SERIALIZATION_BUFFER_SIZE_BYTES_ );
+    registerImmutable = (bool*)malloc( count * sizeof( bool ) );
     flash_init( start_addr, memory_size );
+    ReadRegisters();
 }
 
 void RegisterDestroy()
 {
+    flash_destroy();
+
+    free( registerImmutable );
+    free( registerNames );
+
     register_start_addr = 0;
     register_end_addr = 0;
     register_size = 0;
     register_count = 0;
-    free( registerNames );
-    flash_destroy();
+}
+
+void ReadRegisters()
+{
+    FlashRegister reg;
+    for ( uint32_t i = 0; i < max_register_count; i++ )
+    {
+        mattfair_storage_Register_1_0_initialize_( &reg );
+        if ( !RegisterReadByIndex( i, &reg ) )
+        {
+            fprintf( stderr, "Failed to read register %d\r\n", i );
+            break;
+        }
+
+        if ( reg.name.name.count == 0 || reg.name.name.count == 255 )
+        {
+            break;
+        }
+
+        printf( "Register %d: %.*s\r\n", i, reg.name.name.count, reg.name.name.elements );
+        registerNames[register_count] = reg.name;
+        registerImmutable[register_count] = reg.isImmutable;
+        register_count++;
+    }
 }
 
 uint32_t RegisterStartAddress()
@@ -63,55 +105,67 @@ size_t RegisterCount()
     return register_count;
 }
 
-bool RegisterWrite( const char* name, const uavcan_register_Value_1_0* value )
+bool RegisterWrite( const char* name, const uavcan_register_Value_1_0* value, bool immutable )
 {
-    uavcan_register_Name_1_0* storedName = &registerNames[registerNamesCount++];
+    RegisterIndex index = FindRegisterIndex( name );
+    if ( index.status == VALID )
+    {
+        if ( registerImmutable[index.value] )
+        {
+            fprintf( stderr, "Attempt to write immutable register %s denied\r\n", name );
+            return false;
+        }
+    }
+    else if ( index.status == REGISTER_NOT_FOUND )
+    {
+        index.status = VALID;
+        index.value = register_count++;
+    }
+
+    uavcan_register_Name_1_0* storedName = &registerNames[index.value];
     uavcan_register_Name_1_0_initialize_( storedName );
     storedName->name.count = strlen( name );
     memset( storedName->name.elements, 0, sizeof( storedName->name.elements ) );
     memcpy( storedName->name.elements, name, storedName->name.count );
+    registerImmutable[index.value] = immutable;
 
-    FlashRegister reg =
-    {
-      .name = *storedName,
-      .value = *value,
-      .isImmutable = false
-    };
+    FlashRegister reg = { .name = *storedName, .value = *value, .isImmutable = immutable };
 
     size_t size = sizeof( reg );
-    memset( serializeBuffer, 0, size);
+    memset( serializeBuffer, 0, size );
     if ( mattfair_storage_Register_1_0_serialize_( &reg, serializeBuffer, &size ) != NUNAVUT_SUCCESS )
     {
         return false;
     }
 
-    if ( flash_write( serializeBuffer, GetOffsetAddress( register_count ), RegisterSize() ) == FLASH_ERROR )
+    if ( flash_write( serializeBuffer, GetOffsetAddress( index.value ), RegisterSize() ) == FLASH_ERROR )
     {
         return false;
     }
 
-    register_count++;
     return true;
 }
 
-int32_t FindRegisterIndex( const char* name )
+RegisterIndex FindRegisterIndex( const char* name )
 {
-    if ( registerNamesCount == 0 )
+    RegisterIndex notFound = { .status = REGISTER_NOT_FOUND };
+    if ( register_count == 0 )
     {
-        return -1;
+        return notFound;
     }
 
-    for ( int i = 0; i < registerNamesCount; i++ )
+    for ( uint32_t i = 0; i < register_count; i++ )
     {
         uavcan_register_Name_1_0* regName = &registerNames[i];
-        if ( strncmp( (const char*)regName->name.elements, name, regName->name.count ) == 0 )
+        if ( strncmp( (const char*)regName->name.elements, name, strlen( name ) ) == 0 )
         {
-            //printf( "Found Name: %s, Index: %d\r\n", name, i );
-            return i;
+            // printf( "Found Name: %s, Index: %d\r\n", name, i );
+            RegisterIndex found = { .value = i };
+            return found;
         }
     }
 
-    return -1;  // Not found
+    return notFound;
 }
 
 int8_t DeserializeFlashRegister( void* const out_obj, const uint8_t* buffer, size_t* const inout_buffer_size_bytes )
@@ -121,14 +175,26 @@ int8_t DeserializeFlashRegister( void* const out_obj, const uint8_t* buffer, siz
 
 bool RegisterRead( const char* name, FlashRegister* regOut )
 {
-    int32_t index = FindRegisterIndex( name );
-    if ( index == -1 )
+    RegisterIndex index = FindRegisterIndex( name );
+    if ( index.status == REGISTER_NOT_FOUND )
     {
         return false;
     }
 
-    if ( flash_read( regOut, GetOffsetAddress( (uint32_t)index ), RegisterSize(), DeserializeFlashRegister ) ==
+    if ( flash_read( regOut, GetOffsetAddress( index.value ), RegisterSize(), DeserializeFlashRegister ) ==
          FLASH_ERROR )
+    {
+        return false;
+    }
+
+    return true;
+}
+
+bool RegisterReadByIndex( uint32_t index, FlashRegister* regOut )
+{
+    uint32_t address = GetOffsetAddress( index );
+
+    if ( flash_read( regOut, address, RegisterSize(), DeserializeFlashRegister ) == FLASH_ERROR )
     {
         return false;
     }
@@ -138,7 +204,7 @@ bool RegisterRead( const char* name, FlashRegister* regOut )
 
 uavcan_register_Name_1_0 RegisterNameByIndex( const uint16_t index )
 {
-    if ( index >= registerNamesCount )
+    if ( index >= register_count )
     {
         uavcan_register_Name_1_0 empty = { 0 };
         return empty;
@@ -150,6 +216,32 @@ uavcan_register_Name_1_0 RegisterNameByIndex( const uint16_t index )
 uint32_t GetOffsetAddress( uint32_t index )
 {
     return register_start_addr + index * register_size;
+}
+
+// Erase all registers such that the defaults are used at the next launch.
+void RegisterFactoryReset( void )
+{
+    if ( flash_unlock() != FLASH_OK )
+    {
+        fprintf( stderr, "Could not unlock flash memory\r\n" );
+    }
+
+    // if we failed to erase the flash memory, don't clear things
+    if ( flash_erase() == FLASH_OK )
+    {
+        memset( registerNames, 0, max_register_count * uavcan_register_Name_1_0_SERIALIZATION_BUFFER_SIZE_BYTES_ );
+        memset( registerImmutable, 0, max_register_count * sizeof( bool ) );
+        register_count = 0;
+    }
+    else
+    {
+        fprintf( stderr, "Failed to erase flash memory\r\n" );
+    }
+
+    if ( flash_lock() != FLASH_OK )
+    {
+        fprintf( stderr, "Could not lock flash memory\r\n" );
+    }
 }
 
 #if 0

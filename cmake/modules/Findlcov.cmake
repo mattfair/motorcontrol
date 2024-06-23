@@ -64,11 +64,11 @@ if(LCOV)
     function(define_native_test_run_with_lcov ARG_TEST_NAME ARG_OUTDIR ARG_SOURCE_FILTER_DIR)
         message(STATUS "Adding test ${ARG_TEST_NAME} for source ${ARG_SOURCE_FILTER_DIR}")
         add_custom_command(
-            COMMAND # Reset coverage data
-                ${LCOV}
-                        ${GOV_TOOL_ARG}
-                        --zerocounters
-                        --directory ${CMAKE_CURRENT_BINARY_DIR}
+            #COMMAND # Reset coverage data
+            #    ${LCOV}
+            #            ${GOV_TOOL_ARG}
+            #            --zerocounters
+            #            --directory ${CMAKE_CURRENT_BINARY_DIR}
             COMMAND # Generate initial "zero coverage" data.
                 ${LCOV}
                         ${GOV_TOOL_ARG}
@@ -101,7 +101,7 @@ if(LCOV)
                         --extract ${ARG_OUTDIR}/coverage.${ARG_TEST_NAME}.info
                         ${ARG_SOURCE_FILTER_DIR}
                         --output-file ${ARG_OUTDIR}/coverage.${ARG_TEST_NAME}.filtered.info
-            OUTPUT ${ARG_OUTDIR}/coverage.${ARG_TEST_NAME}.filtered.info
+            OUTPUT ${ARG_OUTDIR}/coverage.${ARG_TEST_NAME}.baseline.info ${ARG_OUTDIR}/coverage.${ARG_TEST_NAME}.filtered.info ${ARG_OUTDIR}/coverage.${ARG_TEST_NAME}.test.info
             DEPENDS ${ARG_TEST_NAME}
         )
 

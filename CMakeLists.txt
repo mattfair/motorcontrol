@@ -231,6 +231,10 @@ add_definitions(
 project(${PROJECT_NAME})
 
 if(BUILD_TESTS)
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fprofile-arcs -ftest-coverage")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fprofile-arcs -ftest-coverage")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fprofile-arcs -ftest-coverage")
+
     include(${CMAKE_SOURCE_DIR}/cmake/utils.cmake)
     apply_flag_set(${CMAKE_SOURCE_DIR}/cmake/compiler_flag_sets/native_w_cov.cmake "" "" "")
 
@@ -384,7 +388,7 @@ if(BUILD_TESTS)
         # Define native test run with lcov
         define_native_test_run_with_lcov(${TEST_NAME} ${VERIFICATIONS_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/\\*)
         define_native_test_coverage(${TEST_NAME} ${VERIFICATIONS_BINARY_DIR})
-
+       
         # Append to lists
         list(APPEND ALL_TESTS "run_${TEST_NAME}")
         list(APPEND ALL_TESTS_WITH_LCOV "run_${TEST_NAME}_with_lcov")
@@ -400,7 +404,7 @@ if(BUILD_TESTS)
 
     add_definitions(
       -DCMOCK_MEM_STATIC
-      -DCMOCK_MEM_SIZE=131072
+      -DCMOCK_MEM_SIZE=1048576
       -DCMOCK_MEM_ALIGN=2
     )
 
@@ -438,7 +442,7 @@ if(BUILD_TESTS)
               --rc lcov_branch_coverage=1
               ${ALL_TEST_COVERAGE}
               --output-file ${VERIFICATIONS_BINARY_DIR}/coverage.all.info
-        DEPENDS ${ALL_TESTS_WITH_LCOV}
+        DEPENDS lcov_zero ${ALL_TESTS_WITH_LCOV}
         COMMENT "Capturing all coverage data."
     )
 
