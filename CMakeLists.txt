@@ -29,9 +29,11 @@ set (MCPU_CORTEX_M55				  "-mcpu=cortex-m55")
 set (MCPU_CORTEX_M85				  "-mcpu=cortex-m85")
 set (MFPU_FPV4_SP_D16                 "-mfpu=fpv4-sp-d16")
 set (MFPU_FPV5_D16                    "-mfpu=fpv5-d16")
-set (RUNTIME_LIBRARY_REDUCED_C        "--specs=nano.specs")
+
+set(GCC_EXEC_PREFIX "/usr/local/arm-none-eabi/lib")
+set (RUNTIME_LIBRARY_REDUCED_C        "--specs=${GCC_EXEC_PREFIX}/nano.specs")
+set (RUNTIME_LIBRARY_SYSCALLS_MINIMAL "--specs=${GCC_EXEC_PREFIX}/nosys.specs")
 set (RUNTIME_LIBRARY_STD_C            "")
-set (RUNTIME_LIBRARY_SYSCALLS_MINIMAL "--specs=nosys.specs")
 set (RUNTIME_LIBRARY_SYSCALLS_NONE    "")
 set (MFLOAT_ABI_SOFTWARE              "-mfloat-abi=soft")
 set (MFLOAT_ABI_HARDWARE              "-mfloat-abi=hard")
@@ -230,7 +232,25 @@ add_definitions(
 ################## PROJECT SETUP ######################################
 project(${PROJECT_NAME})
 
+set(IO_SRC 
+  "${CMAKE_SOURCE_DIR}/src/IO/register.c"
+  "${CMAKE_SOURCE_DIR}/src/IO/flash.c"
+)
+
+add_library(io ${IO_SRC})
+target_include_directories(io PRIVATE ${INCLUDE_DIRS})
+add_dependencies(io dsdl-regulated dsdl-non-standard dsdl-mattfair nunavut-support)
+target_compile_options(io PRIVATE
+  -Wno-error=missing-declarations
+  -Wno-error=unused-variable
+  -Wno-error=unused-parameter
+)
+
 if(BUILD_TESTS)
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fprofile-arcs -ftest-coverage")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fprofile-arcs -ftest-coverage")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fprofile-arcs -ftest-coverage")
+
     include(${CMAKE_SOURCE_DIR}/cmake/utils.cmake)
     apply_flag_set(${CMAKE_SOURCE_DIR}/cmake/compiler_flag_sets/native_w_cov.cmake "" "" "")
 
@@ -238,11 +258,6 @@ if(BUILD_TESTS)
     SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -m32")
     SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -m32")
     SET(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -m32")
-
-    set(IO_SRC 
-      #"${CMAKE_SOURCE_DIR}/src/IO/register.c"
-      "${CMAKE_SOURCE_DIR}/src/IO/flash.c"
-    )
 
     set(VERIFICATIONS_BINARY_DIR "${CMAKE_BINARY_DIR}/verifications")
     file(MAKE_DIRECTORY ${VERIFICATIONS_BINARY_DIR})
@@ -312,13 +327,6 @@ if(BUILD_TESTS)
                           )
     target_compile_definitions(mock_hal_driver PRIVATE STM32F446xx)
 
-    add_library(io ${IO_SRC})
-    target_include_directories(io PRIVATE ${INCLUDE_DIRS})
-    add_dependencies(io dsdl-regulated dsdl-non-standard dsdl-mattfair nunavut-support)
-    target_compile_options(io PRIVATE
-      -Wno-error=missing-declarations
-      -Wno-error=unused-variable
-    )
 
     # TODO: work on removing these
     add_compile_options(
@@ -372,74 +380,107 @@ if(BUILD_TESTS)
       ${TEST_INCLUDE_DIRS}
     )
 
-    create_test(io_flash_test tests/IO/flash_test.c io mock_hal_driver)
-    target_include_directories(io_flash_test PRIVATE 
-      ${INCLUDE_DIRS} 
-      ${TEST_INCLUDE_DIRS}
+    function(create_test_with_coverage TEST_NAME TEST_SOURCE TEST_TARGET DEPENDENCIES)
+        # Create the test
+        create_test(${TEST_NAME} ${TEST_SOURCE} ${TEST_TARGET} ${DEPENDENCIES})
+        target_include_directories(${TEST_NAME} PRIVATE 
+          ${INCLUDE_DIRS} 
+          ${TEST_INCLUDE_DIRS}
+        )
+
+        # Define native test run with lcov
+        define_native_test_run_with_lcov(${TEST_NAME} ${VERIFICATIONS_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/\\*)
+        define_native_test_coverage(${TEST_NAME} ${VERIFICATIONS_BINARY_DIR})
+       
+        # Append to lists
+        list(APPEND ALL_TESTS "run_${TEST_NAME}")
+        list(APPEND ALL_TESTS_WITH_LCOV "run_${TEST_NAME}_with_lcov")
+        list(APPEND ALL_TEST_COVERAGE "--add-tracefile")
+        list(APPEND ALL_TEST_COVERAGE "${VERIFICATIONS_BINARY_DIR}/coverage.${TEST_NAME}.filtered.info")
+
+        # Update lists
+        set(ALL_TESTS ${ALL_TESTS} PARENT_SCOPE)
+        set(ALL_TESTS_WITH_LCOV ${ALL_TESTS_WITH_LCOV} PARENT_SCOPE)
+        set(ALL_TEST_COVERAGE ${ALL_TEST_COVERAGE} PARENT_SCOPE)
+    endfunction()
+
+
+    add_definitions(
+      -DCMOCK_MEM_STATIC
+      -DCMOCK_MEM_SIZE=1048576
+      -DCMOCK_MEM_ALIGN=2
     )
-    set(NATIVE_TEST_NAME io_flash_test)
-    define_native_test_run_with_lcov(${NATIVE_TEST_NAME} ${VERIFICATIONS_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/\\*)
-    define_natve_test_coverage(${NATIVE_TEST_NAME} ${VERIFICATIONS_BINARY_DIR})
-    list(APPEND ALL_TESTS "run_${NATIVE_TEST_NAME}")
-    list(APPEND ALL_TESTS_WITH_LCOV "run_${NATIVE_TEST_NAME}_with_lcov")
-    list(APPEND ALL_TEST_COVERAGE "--add-tracefile")
-    list(APPEND ALL_TEST_COVERAGE "${VERIFICATIONS_BINARY_DIR}/coverage.${NATIVE_TEST_NAME}.filtered.info")
-    set(ALL_TESTS ${ALL_TESTS} PARENT_SCOPE)
-    set(ALL_TESTS_WITH_LCOV ${ALL_TESTS_WITH_LCOV} PARENT_SCOPE)
-    set(ALL_TEST_COVERAGE ${ALL_TEST_COVERAGE} PARENT_SCOPE)
+
+    create_test_with_coverage(io_flash_test tests/IO/flash_test.c io mock_hal_driver)
+    create_test_with_coverage(io_register_test tests/IO/register_test.c io mock_hal_driver)
 
     # Custom target to run all tests with ctest --output-on-failure
     add_custom_target(run_tests
         COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure
         DEPENDS mock_hal_test
         DEPENDS io_flash_test
+        DEPENDS io_register_test
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
         COMMENT "Running tests with verbose output on failure"
     )
 
     get_filename_component(NUNAVUT_PROJECT_ROOT "${CMAKE_SOURCE_DIR}" REALPATH BASE_DIR "${CMAKE_BINARY_DIR}")
-    
+
+    # Reset coverage counters
     add_custom_target(
         lcov_zero
-        ${LCOV}
+        COMMAND ${LCOV}
               ${GOV_TOOL_ARG}
               --zerocounters
               --directory ${CMAKE_CURRENT_BINARY_DIR}
         COMMENT "Resetting coverage counters."
     )
 
-
+    # Capture all coverage data
     add_custom_command(
         OUTPUT ${VERIFICATIONS_BINARY_DIR}/coverage.all.info
-        COMMAND
-              ${LCOV}
-                  ${GOV_TOOL_ARG}
-                  --rc lcov_branch_coverage=1
-                  ${ALL_TEST_COVERAGE}
-                  --output-file ${VERIFICATIONS_BINARY_DIR}/coverage.all.info
-        DEPENDS ${ALL_TESTS_WITH_LCOV}
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${VERIFICATIONS_BINARY_DIR}
+        COMMAND ${LCOV}
+              ${GOV_TOOL_ARG}
+              --rc lcov_branch_coverage=1
+              ${ALL_TEST_COVERAGE}
+              --output-file ${VERIFICATIONS_BINARY_DIR}/coverage.all.info
+        DEPENDS lcov_zero ${ALL_TESTS_WITH_LCOV}
+        COMMENT "Capturing all coverage data."
     )
 
+    # Filter out unwanted directories
+    add_custom_command(
+        OUTPUT ${VERIFICATIONS_BINARY_DIR}/coverage.filtered.info
+        COMMAND ${LCOV}
+              ${GOV_TOOL_ARG}
+              --rc lcov_branch_coverage=1
+              --remove ${VERIFICATIONS_BINARY_DIR}/coverage.all.info
+                      '*/build/*'
+                      '*/tests/*'
+                      '*/submodules/*'
+              --output-file ${VERIFICATIONS_BINARY_DIR}/coverage.filtered.info
+        DEPENDS ${VERIFICATIONS_BINARY_DIR}/coverage.all.info
+        COMMENT "Filtering out unwanted directories from coverage data."
+    )
+
+    # Include only the src directory
     add_custom_command(
         OUTPUT ${VERIFICATIONS_BINARY_DIR}/coverage.info
-        COMMAND
-              ${LCOV}
-                  ${GOV_TOOL_ARG}
-                  --rc lcov_branch_coverage=1
-                  --extract ${VERIFICATIONS_BINARY_DIR}/coverage.all.info
-                            ${PROJECT_ROOT}/\\*
-                  --output-file ${VERIFICATIONS_BINARY_DIR}/coverage.info
-        DEPENDS ${VERIFICATIONS_BINARY_DIR}/coverage.all.info
-    )
-
-    add_custom_target(
-        cov_info
+        COMMAND ${LCOV}
+              ${GOV_TOOL_ARG}
+              --rc lcov_branch_coverage=1
+              --extract ${VERIFICATIONS_BINARY_DIR}/coverage.filtered.info
+                        "${CMAKE_SOURCE_DIR}/src/*"
+              --output-file ${VERIFICATIONS_BINARY_DIR}/coverage.info
         DEPENDS ${VERIFICATIONS_BINARY_DIR}/coverage.info
+        COMMENT "Extracting coverage data for src directory."
     )
 
-    add_custom_target(
-        cov_all
-        ${GENHTML} --title "${PROJECT_NAME} native test coverage"
+    # Custom target to generate HTML report
+    add_custom_command(
+        OUTPUT ${VERIFICATIONS_BINARY_DIR}/coverage/all/index.html
+        COMMAND ${GENHTML} --title "${PROJECT_NAME} native test coverage"
               --output-directory ${VERIFICATIONS_BINARY_DIR}/coverage/all
               --demangle-cpp
               --sort
@@ -449,12 +490,35 @@ if(BUILD_TESTS)
               --legend
               --highlight
               --show-details
-              ${VERIFICATIONS_BINARY_DIR}/coverage.info
-        DEPENDS ${VERIFICATIONS_BINARY_DIR}/coverage.info
-        COMMENT "Build and run all tests and generate an overall html coverage report."
+              ${VERIFICATIONS_BINARY_DIR}/coverage.filtered.info
+        DEPENDS ${VERIFICATIONS_BINARY_DIR}/coverage.filtered.info
+        COMMENT "Generating HTML coverage report."
     )
 
+    # Add a custom target to build the coverage report
+    add_custom_target(
+        coverage_report
+        DEPENDS ${VERIFICATIONS_BINARY_DIR}/coverage/all/index.html
+    )
+
+    # Make 'coverage' target depend on the intermediate steps
+    add_custom_target(
+        coverage
+        DEPENDS coverage_report
+    )
+
+    # Debug: Print the final info file
+    add_custom_command(
+        TARGET coverage_report
+        POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E echo "Final coverage file:"
+        COMMAND ${CMAKE_COMMAND} -E cat ${VERIFICATIONS_BINARY_DIR}/coverage.filtered.info
+    )
+
+
 else()
+  #set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fno-short-enums")
+
     # Cross compile for ARM
     apply_flag_set(${CMAKE_SOURCE_DIR}/cmake/compiler_flag_sets/native.cmake "" "" "")
 
@@ -463,15 +527,18 @@ else()
     set(CMAKE_SIZE_UTIL arm-none-eabi-size)
 
     set (LINKER_SCRIPT            "${CMAKE_SOURCE_DIR}/STM32F446RETX_FLASH.ld")
-    set (MCPU                     "-mcpu=Cortex-M4")
+    set (MCPU                     "-mcpu=cortex-m4")
     set (MFPU                 "-mfpu=fpv4-sp-d16")
     set (MFLOAT_ABI               "-mfloat-abi=hard")
-    set (RUNTIME_LIBRARY          "--specs=nano.specs")
-    set (RUNTIME_LIBRARY_SYSCALLS "--specs=nosys.specs")
+
+    set (RUNTIME_LIBRARY        ${RUNTIME_LIBRARY_REDUCED_C})
+    set (RUNTIME_LIBRARY_SYSCALLS ${RUNTIME_LIBRARY_SYSCALLS_MINIMAL})
+    #set (RUNTIME_LIBRARY        ${RUNTIME_LIBRARY_STD_C})
+    #set (RUNTIME_LIBRARY_SYSCALLS ${RUNTIME_LIBRARY_SYSCALLS_NONE})
 
     set (CMAKE_EXECUTABLE_SUFFIX ".elf")
     set (CMAKE_STATIC_LIBRARY_SUFFIX ".a")
-    set (CMAKE_C_FLAGS "${MCPU} -std=gnu11 ${MFPU} ${MFLOAT_ABI} ${RUNTIME_LIBRARY} -mthumb -Wall") # -Werror")
+    set (CMAKE_C_FLAGS "${MCPU} ${MFPU} ${MFLOAT_ABI} ${RUNTIME_LIBRARY} -mthumb -Wall") # -Werror")
     set (CMAKE_EXE_LINKER_FLAGS "-T${LINKER_SCRIPT} ${RUNTIME_LIBRARY_SYSCALLS} -Wl,-Map=test.map -Wl,--gc-sections -static -Wl,--start-group -lc -lm -Wl,--end-group")
     set (CMAKE_ASM_FLAGS "${CMAKE_C_FLAGS} -x assembler-with-cpp")
 
@@ -501,15 +568,13 @@ else()
     # arm target
     add_executable(arm_motorcontrol ${PROJECT_SOURCES} "${CMAKE_SOURCE_DIR}/src/Core/Src/main.c")
     target_include_directories(arm_motorcontrol PRIVATE ${INCLUDE_DIRS})
+    target_link_libraries(arm_motorcontrol PRIVATE io)
     set_target_properties(arm_motorcontrol PROPERTIES
         C_COMPILER arm-none-eabi-gcc
         CXX_COMPILER arm-none-eabi-g++
     )
     target_compile_options(arm_motorcontrol PRIVATE -mcpu=cortex-m4 -mthumb -mfpu=fpv4-sp-d16 -mfloat-abi=hard -Wall)
-    add_dependencies(arm_motorcontrol dsdl-regulated)
-    add_dependencies(arm_motorcontrol dsdl-non-standard)
-    add_dependencies(arm_motorcontrol dsdl-mattfair)
-    add_dependencies(arm_motorcontrol nunavut-support)
+    add_dependencies(arm_motorcontrol dsdl-regulated dsdl-non-standard dsdl-mattfair nunavut-support)
 
     # Add a post-build command to generate a binary file from the ELF output
     add_custom_command(TARGET arm_motorcontrol POST_BUILD
