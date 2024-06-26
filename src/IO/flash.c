@@ -9,12 +9,12 @@ struct InternalFlashState
 {
     uint32_t start_addr;
     uint32_t end_addr;
-} state;
+} flash_state;
 
 FlashStatus flash_init( uint32_t address, size_t size )
 {
-    state.start_addr = address;
-    state.end_addr = address + size;
+    flash_state.start_addr = address;
+    flash_state.end_addr = address + size;
 
     return FLASH_OK;
 }
@@ -26,12 +26,12 @@ FlashStatus flash_destroy( void )
 
 uint32_t flash_get_addr( void )
 {
-    return state.start_addr;
+    return flash_state.start_addr;
 }
 
 uint32_t flash_get_size( void )
 {
-    return state.end_addr - state.start_addr;
+    return flash_state.end_addr - flash_state.start_addr;
 }
 
 FlashStatus flash_erase( void )
@@ -86,7 +86,7 @@ FlashStatus flash_unlock( void )
 FlashStatus flash_read( void* data, uint32_t address, size_t size, DeSerializeFunctionPointer deserialize )
 {
     // Ensure the address is within the bounds of the flash memory
-    if ( address < state.start_addr || address + size > state.end_addr )
+    if ( address < flash_state.start_addr || address + size > flash_state.end_addr )
     {
         return FLASH_ERROR;
     }
@@ -106,7 +106,7 @@ FlashStatus flash_read( void* data, uint32_t address, size_t size, DeSerializeFu
 
 FlashStatus flash_write( void* data, uint32_t address, size_t size )
 {
-    if ( address < state.start_addr || address + size > state.end_addr )
+    if ( address < flash_state.start_addr || address + size > flash_state.end_addr )
     {
         return FLASH_ERROR;
     }

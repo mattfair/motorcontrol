@@ -21,6 +21,7 @@
 #include "can.h"
 
 /* USER CODE BEGIN 0 */
+#include <stdio.h>
 #include "hw_config.h"
 #include "math_ops.h"
 #include "user_config.h"

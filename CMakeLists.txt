@@ -29,9 +29,11 @@ set (MCPU_CORTEX_M55				  "-mcpu=cortex-m55")
 set (MCPU_CORTEX_M85				  "-mcpu=cortex-m85")
 set (MFPU_FPV4_SP_D16                 "-mfpu=fpv4-sp-d16")
 set (MFPU_FPV5_D16                    "-mfpu=fpv5-d16")
-set (RUNTIME_LIBRARY_REDUCED_C        "--specs=nano.specs")
+
+set(GCC_EXEC_PREFIX "/usr/local/arm-none-eabi/lib")
+set (RUNTIME_LIBRARY_REDUCED_C        "--specs=${GCC_EXEC_PREFIX}/nano.specs")
+set (RUNTIME_LIBRARY_SYSCALLS_MINIMAL "--specs=${GCC_EXEC_PREFIX}/nosys.specs")
 set (RUNTIME_LIBRARY_STD_C            "")
-set (RUNTIME_LIBRARY_SYSCALLS_MINIMAL "--specs=nosys.specs")
 set (RUNTIME_LIBRARY_SYSCALLS_NONE    "")
 set (MFLOAT_ABI_SOFTWARE              "-mfloat-abi=soft")
 set (MFLOAT_ABI_HARDWARE              "-mfloat-abi=hard")
@@ -230,6 +232,20 @@ add_definitions(
 ################## PROJECT SETUP ######################################
 project(${PROJECT_NAME})
 
+set(IO_SRC 
+  "${CMAKE_SOURCE_DIR}/src/IO/register.c"
+  "${CMAKE_SOURCE_DIR}/src/IO/flash.c"
+)
+
+add_library(io ${IO_SRC})
+target_include_directories(io PRIVATE ${INCLUDE_DIRS})
+add_dependencies(io dsdl-regulated dsdl-non-standard dsdl-mattfair nunavut-support)
+target_compile_options(io PRIVATE
+  -Wno-error=missing-declarations
+  -Wno-error=unused-variable
+  -Wno-error=unused-parameter
+)
+
 if(BUILD_TESTS)
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fprofile-arcs -ftest-coverage")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fprofile-arcs -ftest-coverage")
@@ -242,11 +258,6 @@ if(BUILD_TESTS)
     SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -m32")
     SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -m32")
     SET(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -m32")
-
-    set(IO_SRC 
-      "${CMAKE_SOURCE_DIR}/src/IO/register.c"
-      "${CMAKE_SOURCE_DIR}/src/IO/flash.c"
-    )
 
     set(VERIFICATIONS_BINARY_DIR "${CMAKE_BINARY_DIR}/verifications")
     file(MAKE_DIRECTORY ${VERIFICATIONS_BINARY_DIR})
@@ -316,14 +327,6 @@ if(BUILD_TESTS)
                           )
     target_compile_definitions(mock_hal_driver PRIVATE STM32F446xx)
 
-    add_library(io ${IO_SRC})
-    target_include_directories(io PRIVATE ${INCLUDE_DIRS})
-    add_dependencies(io dsdl-regulated dsdl-non-standard dsdl-mattfair nunavut-support)
-    target_compile_options(io PRIVATE
-      -Wno-error=missing-declarations
-      -Wno-error=unused-variable
-      -Wno-error=unused-parameter
-    )
 
     # TODO: work on removing these
     add_compile_options(
@@ -514,6 +517,8 @@ if(BUILD_TESTS)
 
 
 else()
+  #set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fno-short-enums")
+
     # Cross compile for ARM
     apply_flag_set(${CMAKE_SOURCE_DIR}/cmake/compiler_flag_sets/native.cmake "" "" "")
 
@@ -522,15 +527,18 @@ else()
     set(CMAKE_SIZE_UTIL arm-none-eabi-size)
 
     set (LINKER_SCRIPT            "${CMAKE_SOURCE_DIR}/STM32F446RETX_FLASH.ld")
-    set (MCPU                     "-mcpu=Cortex-M4")
+    set (MCPU                     "-mcpu=cortex-m4")
     set (MFPU                 "-mfpu=fpv4-sp-d16")
     set (MFLOAT_ABI               "-mfloat-abi=hard")
-    set (RUNTIME_LIBRARY          "--specs=nano.specs")
-    set (RUNTIME_LIBRARY_SYSCALLS "--specs=nosys.specs")
+
+    set (RUNTIME_LIBRARY        ${RUNTIME_LIBRARY_REDUCED_C})
+    set (RUNTIME_LIBRARY_SYSCALLS ${RUNTIME_LIBRARY_SYSCALLS_MINIMAL})
+    #set (RUNTIME_LIBRARY        ${RUNTIME_LIBRARY_STD_C})
+    #set (RUNTIME_LIBRARY_SYSCALLS ${RUNTIME_LIBRARY_SYSCALLS_NONE})
 
     set (CMAKE_EXECUTABLE_SUFFIX ".elf")
     set (CMAKE_STATIC_LIBRARY_SUFFIX ".a")
-    set (CMAKE_C_FLAGS "${MCPU} -std=gnu11 ${MFPU} ${MFLOAT_ABI} ${RUNTIME_LIBRARY} -mthumb -Wall") # -Werror")
+    set (CMAKE_C_FLAGS "${MCPU} ${MFPU} ${MFLOAT_ABI} ${RUNTIME_LIBRARY} -mthumb -Wall") # -Werror")
     set (CMAKE_EXE_LINKER_FLAGS "-T${LINKER_SCRIPT} ${RUNTIME_LIBRARY_SYSCALLS} -Wl,-Map=test.map -Wl,--gc-sections -static -Wl,--start-group -lc -lm -Wl,--end-group")
     set (CMAKE_ASM_FLAGS "${CMAKE_C_FLAGS} -x assembler-with-cpp")
 
@@ -560,15 +568,13 @@ else()
     # arm target
     add_executable(arm_motorcontrol ${PROJECT_SOURCES} "${CMAKE_SOURCE_DIR}/src/Core/Src/main.c")
     target_include_directories(arm_motorcontrol PRIVATE ${INCLUDE_DIRS})
+    target_link_libraries(arm_motorcontrol PRIVATE io)
     set_target_properties(arm_motorcontrol PROPERTIES
         C_COMPILER arm-none-eabi-gcc
         CXX_COMPILER arm-none-eabi-g++
     )
     target_compile_options(arm_motorcontrol PRIVATE -mcpu=cortex-m4 -mthumb -mfpu=fpv4-sp-d16 -mfloat-abi=hard -Wall)
-    add_dependencies(arm_motorcontrol dsdl-regulated)
-    add_dependencies(arm_motorcontrol dsdl-non-standard)
-    add_dependencies(arm_motorcontrol dsdl-mattfair)
-    add_dependencies(arm_motorcontrol nunavut-support)
+    add_dependencies(arm_motorcontrol dsdl-regulated dsdl-non-standard dsdl-mattfair nunavut-support)
 
     # Add a post-build command to generate a binary file from the ELF output
     add_custom_command(TARGET arm_motorcontrol POST_BUILD

@@ -107,7 +107,9 @@ void add_natural_32( int index, const char* name, uint32_t value, bool isImmutab
     mattfair_storage_Register_1_0_serialize_( &reg, buffer, &bufferSize );
 
     size_t size = RegisterSize();
+    HAL_FLASH_Unlock_ExpectAndReturn( HAL_OK );
     WriteFlashBytesExpectAndReturn( GetOffsetAddress( index ), buffer, size, HAL_OK );
+    HAL_FLASH_Lock_ExpectAndReturn( HAL_OK );
 
     TEST_ASSERT_TRUE_MESSAGE( RegisterWrite( name, &reg.value, isImmutable ), "Failed to write natural32 register" );
     //dump_flash_data_to_file();
@@ -136,9 +138,11 @@ void AddRegisterReal64Value( int index, const char* name, double value )
     uint8_t buffer[bufferSize];
     memset( buffer, 0, bufferSize );
     mattfair_storage_Register_1_0_serialize_( &reg, buffer, &bufferSize );
-
     size_t size = RegisterSize();
+
+    HAL_FLASH_Unlock_ExpectAndReturn( HAL_OK );
     WriteFlashBytesExpectAndReturn( GetOffsetAddress( index ), buffer, size, HAL_OK );
+    HAL_FLASH_Lock_ExpectAndReturn( HAL_OK );
 
     TEST_ASSERT_TRUE_MESSAGE( RegisterWrite( name, &reg.value, false ), "Failed to write real64 register" );
     //dump_flash_data_to_file();
@@ -157,9 +161,11 @@ void AddRegisterStringValue( int index, const char* name, const char* value )
     uint8_t buffer[bufferSize];
     memset( buffer, 0, bufferSize );
     mattfair_storage_Register_1_0_serialize_( &reg, buffer, &bufferSize );
-
     size_t size = RegisterSize();
+
+    HAL_FLASH_Unlock_ExpectAndReturn( HAL_OK );
     WriteFlashBytesExpectAndReturn( GetOffsetAddress( index ), buffer, size, HAL_OK );
+    HAL_FLASH_Lock_ExpectAndReturn( HAL_OK );
 
     TEST_ASSERT_TRUE_MESSAGE( RegisterWrite( name, &reg.value, false ), "Failed to write string register" );
     //dump_flash_data_to_file();
@@ -192,9 +198,31 @@ void test_write_fail( void )
     memset( buffer, 0, bufferSize );
     mattfair_storage_Register_1_0_serialize_( &reg, buffer, &bufferSize );
 
+    HAL_FLASH_Unlock_ExpectAndReturn( HAL_OK );
     WriteFlashBytesExpectAndReturn( RegisterStartAddress(), buffer, 1, HAL_ERROR );
+    HAL_FLASH_Lock_ExpectAndReturn( HAL_OK );
 
     CallbackReturn = HAL_ERROR;
+    uavcan_register_Value_1_0 value = { 0 };
+    TEST_ASSERT_FALSE( RegisterWrite( "test", &value, false ) );
+}
+
+void test_write_lock_fail( void )
+{
+    FlashRegister reg = { 0 };
+    reg.isImmutable = false;
+    reg.name.name.count = 4;
+    memcpy( reg.name.name.elements, "test", 4 );
+
+    size_t bufferSize = mattfair_storage_Register_1_0_SERIALIZATION_BUFFER_SIZE_BYTES_;
+    uint8_t buffer[bufferSize];
+    memset( buffer, 0, bufferSize );
+    mattfair_storage_Register_1_0_serialize_( &reg, buffer, &bufferSize );
+
+    HAL_FLASH_Unlock_ExpectAndReturn( HAL_ERROR );
+    CallbackReturn = HAL_ERROR;
+    WriteFlashBytesExpectAndReturn( RegisterStartAddress(), buffer, 1, HAL_ERROR);
+    HAL_FLASH_Lock_ExpectAndReturn( HAL_ERROR );
     uavcan_register_Value_1_0 value = { 0 };
     TEST_ASSERT_FALSE( RegisterWrite( "test", &value, false ) );
 }
@@ -211,7 +239,9 @@ void test_single_write_increments_count( void )
     memset( buffer, 0, bufferSize );
     mattfair_storage_Register_1_0_serialize_( &reg, buffer, &bufferSize );
 
+    HAL_FLASH_Unlock_ExpectAndReturn( HAL_OK );
     WriteFlashBytesExpectAndReturn( RegisterStartAddress(), buffer, RegisterSize(), HAL_OK );
+    HAL_FLASH_Lock_ExpectAndReturn( HAL_OK );
 
     uavcan_register_Value_1_0 value = { 0 };
     TEST_ASSERT_TRUE( RegisterWrite( "test", &value, false ) );

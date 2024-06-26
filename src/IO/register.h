@@ -124,54 +124,19 @@ extern "C"
      */
     void RegisterFactoryReset( void );
 
+    /**
+     * @brief Copy one value to the other if their types and dimensionality are the same or automatic conversion is
+     * possible. If the destination is empty, it is simply replaced with the source (assignment always succeeds). The
+     * return value is true if the assignment has been performed, false if it is not possible (in the latter case the
+     * destination is NOT modified).
+     *
+     * @param dst destination value
+     * @param src source value
+     * @return true if successful
+     * @return false if failed
+     */
+    bool RegisterAssign( uavcan_register_Value_1_0* const dst, const uavcan_register_Value_1_0* const src );
+
 #ifdef __cplusplus
 }
-#endif
-
-#if 0
-/**
- * @brief initialize the registers in memory
- * @param start_addr start address of the registers
- * @param end_addr end address of the registers
- */
-void RegisterInit(uint32_t start_addr, uint32_t end_addr);
-
-/**
- * @brief Reads the specified register from the persistent storage into `value`. If the register does not exist or it cannot be automatically
- * converted to the type of the provided argument, the value will be stored in the persistent storage using @ref registerWrite(), overriding existing
- * value. The default will not be initialized if the argument is empty.
- *
- * @param name name of the registry value
- * @param value pointer to the value
- * @return true if successful
- * @return false if failed
- */
-bool RegisterRead(const char* name, uavcan_register_Value_1_0* value);
-
-/**
- * @brief Store the given register value into the persistent storage and mark it as immutable.
- *
- * @param name name of the registry value
- * @param value pointer to the value
- * @return true if successful
- * @return false if failed
- */
-bool RegisterImutableWrite(const char* name, const uavcan_register_Value_1_0* value);
-
-/**
- * @brief Copy one value to the other if their types and dimensionality are the same or automatic conversion is possible. If the destination is empty,
- * it is simply replaced with the source (assignment always succeeds). The return value is true if the assignment has been performed, false if it is
- * not possible (in the latter case the destination is NOT modified).
- *
- * @param dst destination value
- * @param src source value
- * @return true if successful
- * @return false if failed
- */
-bool RegisterAssign(uavcan_register_Value_1_0* const dst, const uavcan_register_Value_1_0* const src);
-
-/**
- * @brief Erase all registers such that the defaults are used at the next launch.
- */
-void RegisterDoFactoryReset(void);
 #endif
