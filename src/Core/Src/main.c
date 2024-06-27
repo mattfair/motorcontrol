@@ -98,6 +98,7 @@ typedef struct State
     O1HeapInstance* heap;
     CanardInstance canard;
     CanardTxQueue canard_tx_queues[CAN_REDUNDANCY_FACTOR];
+    char can_payload_buffer[CANARD_MTU_CAN_CLASSIC];
 
     /// The state of the business logic.
     struct
@@ -286,7 +287,7 @@ void DebugTransfer( CanardRxTransfer* transfer )
 CanardMicrosecond GetMonotonicMicroseconds( void )
 {
     // Get the current millisecond tick count from the HAL
-    uint32_t ms_ticks = HAL_GetTick();
+    uint64_t ms_ticks = (uint64_t)HAL_GetTick();
 
     // Convert the millisecond tick count to microseconds
     CanardMicrosecond us_time = ms_ticks * 1000;
@@ -1706,7 +1707,13 @@ int main( const int argc, char* const argv[] )
             else if ( canard_result == 0 )
             {
                 // Log or handle the condition where a frame was received but not matched by any subscription
-                // fprintf(stderr, "Received frame not matched by any subscription\r\n");
+                //printf("Received frame not matched by any subscription\r\n");
+                //printf( "Ignored frame info: port_id=%s, transfer_id=%d, priority=%d, kind=%d, remote_node_id=%d\r\n",
+                //        PortToName(transfer.metadata.port_id),
+                //        transfer.metadata.transfer_id,
+                //        transfer.metadata.priority,
+                //        transfer.metadata.transfer_kind,
+                //        transfer.metadata.remote_node_id );
             }
             else if ( canard_result == -CANARD_ERROR_INVALID_ARGUMENT )
             {
@@ -1829,24 +1836,23 @@ HAL_StatusTypeDef hal_can_receive( CAN_HandleTypeDef* hcan, CanardFrame* frame )
     result = HAL_CAN_GetRxMessage( hcan, CAN_RX_FIFO0, &rx_header, rx_data );
     if ( result == HAL_OK )
     {
-        // Allocate memory for the payload
-        uint8_t* payload_buffer = malloc( rx_header.DLC * sizeof( uint8_t ) );
-        if ( payload_buffer == NULL )
+        if ( rx_header.DLC > CANARD_MTU_CAN_CLASSIC )
         {
-            return HAL_ERROR;  // Or handle memory allocation failure
+            printf( "Received CAN frame with invalid DLC: %u\r\n", rx_header.DLC );
+            return HAL_ERROR;
         }
 
-        memcpy( payload_buffer, rx_data, rx_header.DLC );
+        memcpy( servo_state.can_payload_buffer, rx_data, rx_header.DLC );
 
         frame->extended_can_id = ( rx_header.IDE == CAN_ID_EXT ) ? rx_header.ExtId : rx_header.StdId;
         frame->payload_size = rx_header.DLC;
-        frame->payload = payload_buffer;  // Point to the newly allocated buffer
+        frame->payload = servo_state.can_payload_buffer;
 
         // Debugging output
         printf( "Received CAN frame with ID: %lu, DLC: %u, Data:", frame->extended_can_id, frame->payload_size );
-        for ( int i = 0; i < frame->payload_size; ++i )
+        for ( size_t i = 0; i < frame->payload_size; ++i )
         {
-            printf( " %02X", payload_buffer[i] );  // Correctly dereferenced
+            printf( " %02X", servo_state.can_payload_buffer[i] );  // Correctly dereferenced
         }
         printf( "\r\n" );
     }
