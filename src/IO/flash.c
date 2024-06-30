@@ -48,6 +48,18 @@ FlashStatus flash_erase( void )
     {
         return FLASH_ERROR;
     }
+
+    // Verification code
+    uint32_t* sector_ptr = (uint32_t*) flash_state.start_addr;
+    uint32_t size  = (flash_state.end_addr - flash_state.start_addr)/sizeof(uint32_t);
+    for (size_t i = 0; i < size; ++i)
+    {
+        if (sector_ptr[i] != 0xFFFFFFFF)
+        {
+            return FLASH_ERROR;
+        }
+    }
+
     return FLASH_OK;
 }
 
