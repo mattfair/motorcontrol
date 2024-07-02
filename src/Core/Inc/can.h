@@ -22,18 +22,17 @@
 #define __CAN_H__
 
 #ifdef __cplusplus
-extern "C"
-{
+extern "C" {
 #endif
 
 /* Includes ------------------------------------------------------------------*/
-#include "stm32f4xx_hal.h"
+#include "main.h"
 
-  /* USER CODE BEGIN Includes */
+/* USER CODE BEGIN Includes */
 
-  /* USER CODE END Includes */
+/* USER CODE END Includes */
 
-  extern CAN_HandleTypeDef hcan1;
+extern CAN_HandleTypeDef hcan1;
 
 /* USER CODE BEGIN Private defines */
 //#define P_MIN -12.5f
@@ -50,41 +49,41 @@ extern "C"
 #define VB_MAX 40.0f
 #define SENSE_BUFFER 0.0f
 
-  /* USER CODE END Private defines */
+/* USER CODE END Private defines */
 
-  void MX_CAN1_Init(void);
+void MX_CAN1_Init(void);
 
-  /* USER CODE BEGIN Prototypes */
-  typedef struct
-  {
-    uint8_t id;
-    uint8_t data[8];
-    CAN_RxHeaderTypeDef rx_header;
-    CAN_FilterTypeDef filter;
-  } CANRxMessage;
+/* USER CODE BEGIN Prototypes */
+    typedef struct
+    {
+        uint8_t id;
+        uint8_t data[8];
+        CAN_RxHeaderTypeDef rx_header;
+        CAN_FilterTypeDef filter;
+    } CANRxMessage;
 
-  typedef struct
-  {
-    uint8_t id;
-    uint8_t data[7];
-    CAN_TxHeaderTypeDef tx_header;
-  } CANTxMessage;
+    typedef struct
+    {
+        uint8_t id;
+        uint8_t data[7];
+        CAN_TxHeaderTypeDef tx_header;
+    } CANTxMessage;
 
-  void HAL_CAN_Reset(CAN_HandleTypeDef *hcan);
+    void HAL_CAN_Reset( CAN_HandleTypeDef* hcan );
 
-  void can_rx_init(CANRxMessage *msg);
-  void can_tx_init(CANTxMessage *msg);
-  void pack_reply(CANTxMessage *msg, uint8_t id, float p, float v, float t,
-                  float vb);
-  void unpack_cmd(CANRxMessage msg, float *commands);
+    void can_rx_init( CANRxMessage* msg );
+    void can_tx_init( CANTxMessage* msg );
+    void pack_reply( CANTxMessage* msg, uint8_t id, float p, float v, float t, float vb );
+    void unpack_cmd( CANRxMessage msg, float* commands );
 
-  void PrintCANStatusRegisters(CAN_HandleTypeDef *hcan);
-  void CanErrorCallback(CAN_HandleTypeDef *hcan);
+    void PrintCANStatusRegisters( CAN_HandleTypeDef* hcan );
+    void CanErrorCallback( CAN_HandleTypeDef* hcan );
 
-  /* USER CODE END Prototypes */
+/* USER CODE END Prototypes */
 
 #ifdef __cplusplus
 }
 #endif
 
 #endif /* __CAN_H__ */
+

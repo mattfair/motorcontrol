@@ -235,6 +235,7 @@ project(${PROJECT_NAME})
 set(IO_SRC 
   "${CMAKE_SOURCE_DIR}/src/IO/register.c"
   "${CMAKE_SOURCE_DIR}/src/IO/flash.c"
+  "${CMAKE_SOURCE_DIR}/src/IO/canringbuffer.c"
 )
 
 add_library(io ${IO_SRC})
@@ -526,7 +527,7 @@ else()
     enable_language(ASM)
     set(CMAKE_SIZE_UTIL arm-none-eabi-size)
 
-    set (LINKER_SCRIPT            "${CMAKE_SOURCE_DIR}/STM32F446RETX_FLASH.ld")
+    set (LINKER_SCRIPT            "${CMAKE_SOURCE_DIR}/src/STM32F446RETX_FLASH.ld")
     set (MCPU                     "-mcpu=cortex-m4")
     set (MFPU                 "-mfpu=fpv4-sp-d16")
     set (MFLOAT_ABI               "-mfloat-abi=hard")

@@ -8,8 +8,8 @@
 #include "IO/register.h"
 #include <inttypes.h>
 #include <stdio.h>
-#include "IO/flash.h"
 #include "Core/Inc/main.h"
+#include "IO/flash.h"
 
 static uint32_t register_start_addr = 0;
 static uint32_t register_end_addr = 0;
@@ -47,9 +47,15 @@ void RegisterInit( uint32_t start_addr, size_t count )
     register_end_addr = start_addr + count * register_size;
     register_count = 0;
     max_register_count = count;
+
+    // allocate memory for the register names and immutability flags
     registerNames =
         (uavcan_register_Name_1_0*)malloc( count * uavcan_register_Name_1_0_SERIALIZATION_BUFFER_SIZE_BYTES_ );
+    assert( registerNames != NULL );
+
     registerImmutable = (bool*)malloc( count * sizeof( bool ) );
+    assert( registerImmutable != NULL );
+
     flash_init( register_start_addr, memory_size );
     ReadRegisters();
 }
@@ -79,12 +85,12 @@ void ReadRegisters()
             break;
         }
 
-        if ( reg.name.name.count == 0 || reg.name.name.count == 255 )
+        if ( reg.name.name.count == 0 || ( reg.name.name.count == 255 && reg.name.name.elements[0] == 255 ) )
         {
             break;
         }
 
-        printf("Register %.*s\r\n", reg.name.name.count, reg.name.name.elements);
+        printf( "Register %.*s\r\n", reg.name.name.count, reg.name.name.elements );
         registerNames[register_count] = reg.name;
         registerImmutable[register_count] = reg.isImmutable;
         register_count++;
