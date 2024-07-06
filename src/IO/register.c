@@ -7,181 +7,361 @@
  */
 #include "IO/register.h"
 #include <inttypes.h>
+#include <o1heap.h>
 #include <stdio.h>
 #include "Core/Inc/main.h"
 #include "IO/flash.h"
 
-static uint32_t register_start_addr = 0;
-static uint32_t register_end_addr = 0;
-static size_t memory_size = 0;
-static size_t register_size = 0;
-static size_t register_count = 0;
-static size_t max_register_count = 0;
-static uavcan_register_Name_1_0* registerNames;
-static bool* registerImmutable;
-static uint8_t serializeBuffer[mattfair_storage_Register_1_0_SERIALIZATION_BUFFER_SIZE_BYTES_] = { 0 };
-
 #define PASTE3_IMPL( x, y, z ) x##y##z
 #define PASTE3( x, y, z ) PASTE3_IMPL( x, y, z )
 
-typedef struct RegisterIndex
+#define REGISTER_ERROR_OUT_OF_MEMORY 1
+#define REGISTER_ERROR_FLASH_WRITE 2
+#define REGISTER_ERROR_FLASH_ERASE 3
+#define REGISTER_ERROR_FLASH_UNLOCK 4
+#define REGISTER_ERROR_FLASH_LOCK 5
+
+// private functions
+void clearTree( RegisterInstance* inst, RegisterTree* tree );
+RegisterTreeItem* registerAllocateQueueItem( RegisterInstance* const ins, const FlashRegister* reg );
+bool serializeAndWriteTree( RegisterTreeItem* item, uint32_t* address );
+void updateIndexToNodeMap( RegisterInstance* instance, RegisterTreeItem* item, size_t* index );
+
+Cavl* avlTrivialRegisterFactory( void* const user_reference );
+int8_t indexByNameAVLPredicate( void* const user_reference, const RegisterTreeNode* const node );
+int8_t searchByNameAVLPredicate( void* const user_reference, const RegisterTreeNode* const node );
+int32_t registerPush( RegisterInstance* inst, FlashRegister* reg );
+RegisterTreeItem* registerPop( RegisterTree* const que, const RegisterTreeItem* item );
+const RegisterTreeItem* getItemByIndex( RegisterInstance* inst, uint32_t index );
+void printTreeNode( const RegisterTreeNode* node );
+
+uint32_t GetOffsetAddress( RegisterInstance* inst, uint32_t index );
+void ReadRegisters( RegisterInstance* inst );
+int8_t DeserializeFlashRegister( void* const out_obj, const uint8_t* buffer, size_t* const inout_buffer_size_bytes );
+
+// static elements
+uint8_t serializeBuffer[1024];
+
+Cavl* avlTrivialRegisterFactory( void* const user_reference )
 {
-    uint32_t value;
-    enum
-    {
-        VALID = 0,
-        REGISTER_NOT_FOUND
-    } status;
-} RegisterIndex;
-
-uint32_t GetOffsetAddress( uint32_t index );
-RegisterIndex FindRegisterIndex( const char* name );
-bool Write( const char* name, const uavcan_register_Value_1_0* value, bool immutable );
-void ReadRegisters();
-
-void RegisterInit( uint32_t start_addr, size_t count )
-{
-    register_start_addr = start_addr;
-    register_size = mattfair_storage_Register_1_0_SERIALIZATION_BUFFER_SIZE_BYTES_;
-    memory_size = register_size * count;
-    register_end_addr = start_addr + count * register_size;
-    register_count = 0;
-    max_register_count = count;
-
-    // allocate memory for the register names and immutability flags
-    registerNames =
-        (uavcan_register_Name_1_0*)malloc( count * uavcan_register_Name_1_0_SERIALIZATION_BUFFER_SIZE_BYTES_ );
-    assert( registerNames != NULL );
-
-    registerImmutable = (bool*)malloc( count * sizeof( bool ) );
-    assert( registerImmutable != NULL );
-
-    flash_init( register_start_addr, memory_size );
-    ReadRegisters();
+    return (RegisterTreeNode*)user_reference;
 }
 
-void RegisterDestroy()
+void clearTree( RegisterInstance* inst, RegisterTree* tree )
 {
-    flash_destroy();
-
-    free( registerImmutable );
-    free( registerNames );
-
-    register_start_addr = 0;
-    register_end_addr = 0;
-    register_size = 0;
-    register_count = 0;
-}
-
-void ReadRegisters()
-{
-    FlashRegister reg;
-    for ( uint32_t i = 0; i < max_register_count; i++ )
+    assert( inst != NULL );
+    while ( tree->size > 0 )
     {
-        mattfair_storage_Register_1_0_initialize_( &reg );
-        if ( !RegisterReadByIndex( i, &reg ) )
+        const RegisterTreeItem* root = (const RegisterTreeItem*)(void*)tree->root;
+        if ( root == NULL )
         {
-            printf( "Failed to read register %" PRIu32 "\r\n", i );
             break;
         }
+        RegisterTreeItem* item = registerPop( tree, root );
+        printf( "Freeing item: %p\r\n", (void*)item );
+        inst->memory_free( inst, item );
+    }
+}
 
-        if ( reg.name.name.count == 0 || ( reg.name.name.count == 255 && reg.name.name.elements[0] == 255 ) )
+/// The item is only allocated and initialized, but NOT included into the queue! The caller needs to do that.
+RegisterTreeItem* registerAllocateQueueItem( RegisterInstance* const ins, const FlashRegister* reg )
+{
+    assert( ins != NULL );
+
+    RegisterTreeItem* const out = (RegisterTreeItem*)ins->memory_allocate( ins, sizeof( RegisterTreeItem ) );
+    if ( out != NULL )
+    {
+        out->base.up = NULL;
+        out->base.lr[0] = NULL;
+        out->base.lr[1] = NULL;
+        out->base.bf = 0;
+        out->value = *reg;
+    }
+    printf( "Allocated item: %p\r\n", (void*)out );
+    return out;
+}
+int8_t indexByNameAVLPredicate( void* const user_reference, const RegisterTreeNode* const node )
+{
+    const RegisterTreeItem* target = (const RegisterTreeItem*)user_reference;
+    const RegisterTreeItem* const other = (const RegisterTreeItem*)(const void*)node;
+    assert( ( target != NULL ) && ( other != NULL ) );
+    return (int8_t)strcmp( (const char*)target->value.name.name.elements,
+                           (const char*)other->value.name.name.elements );
+}
+
+int8_t searchByNameAVLPredicate( void* const user_reference, const RegisterTreeNode* const node )
+{
+    const char* target = (const char*)user_reference;
+    const RegisterTreeItem* const other = (const RegisterTreeItem*)(const void*)node;
+    assert( ( target != NULL ) && ( other != NULL ) );
+    return (int8_t)strcmp( target, (const char*)other->value.name.name.elements );
+}
+
+void printTreeNode( const RegisterTreeNode* node )
+{
+    if ( node == NULL )
+    {
+        return;
+    }
+
+    printf( "Node:%p, up:%p, left:%p, right:%p, bf:%d\r\n",
+            (void*)node,
+            (void*)node->up,
+            (void*)node->lr[0],
+            (void*)node->lr[1],
+            node->bf );
+
+    const RegisterTreeItem* item = (const RegisterTreeItem*)node;
+    printf( "Name: %.*s\r\n", item->value.name.name.count, item->value.name.name.elements );
+    PrintValue( &item->value.value );
+
+    printTreeNode( (const RegisterTreeNode*)node->lr[0] );
+    printTreeNode( (const RegisterTreeNode*)node->lr[1] );
+}
+
+int32_t registerPush( RegisterInstance* inst, FlashRegister* reg )
+{
+    int32_t out = 0;
+
+    printf( "pushing size %d, capacity %d\r\n", inst->registersByName.size, inst->registersByName.capacity );
+    RegisterTreeItem* const item =
+        inst->registersByName.size < inst->registersByName.capacity ? registerAllocateQueueItem( inst, reg ) : NULL;
+
+    if ( item != NULL )
+    {
+        // Insert the newly created register item into the proper AVL trees.
+
+        printf( "Name Before:\r\n" );
+        printTreeNode( inst->registersByName.root );
+        const RegisterTreeNode* const nameNode = cavlSearch(
+            &inst->registersByName.root, (void*)&item->base, &indexByNameAVLPredicate, &avlTrivialRegisterFactory );
+        if ( nameNode != &item->base )
         {
+            printf( "Node already exists\r\n" );
+            inst->memory_free( inst, item );
+        }
+        assert( inst->registersByName.root != NULL );
+        assert( inst->registersByName.size <= inst->registersByName.capacity );
+        inst->registersByName.size++;
+        printf( "Name After:\r\n" );
+        printTreeNode( inst->registersByName.root );
+
+        // reindex the registers by index
+        size_t index = 0;
+        memset( inst->registersByIndex, 0, sizeof( uint32_t ) * inst->registersByName.size );
+        RegisterTreeItem* rootItem = (RegisterTreeItem*)(void*)inst->registersByName.root;
+        updateIndexToNodeMap( inst, rootItem, &index );
+
+        printf( "Pushed item: %p\r\n", (void*)item );
+        out = 1;
+    }
+    else
+    {
+        printf( "Out of memory\r\n" );
+        out = -REGISTER_ERROR_OUT_OF_MEMORY;
+    }
+    assert( ( out < 0 ) || ( out == 1 ) );
+    return out;
+}
+
+RegisterTreeItem* registerPop( RegisterTree* const que, const RegisterTreeItem* item )
+{
+    RegisterTreeItem* out = NULL;
+    if ( ( que != NULL ) && ( item != NULL ) )
+    {
+        // Intentional violation of MISRA: casting away const qualifier. This is considered safe because the API
+        // contract dictates that the pointer shall point to a mutable entity in RAM previously allocated by the
+        // memory manager. It is difficult to avoid this cast in this context.
+        out = (RegisterTreeItem*)item;  // NOSONAR casting away const qualifier.
+
+        // Paragraph 6.7.2.1.15 of the C standard says:
+        //     A pointer to a structure object, suitably converted, points to its initial member, and vice versa.
+        // Note that the highest-priority frame is always a leaf node in the AVL tree, which means that it is very
+        // cheap to remove.
+        cavlRemove( &que->root, &item->base );
+        que->size--;
+    }
+    return out;
+}
+
+void updateIndexToNodeMap( RegisterInstance* instance, RegisterTreeItem* item, size_t* index )
+{
+    if ( item == NULL )
+    {
+        // found leaf node
+        return;
+    }
+
+    instance->registersByIndex[*index] = (uint32_t)(uintptr_t)item;
+    ( *index )++;
+
+    RegisterTreeNode* node = &item->base;
+    RegisterTreeItem* leftItem = (RegisterTreeItem*)(const void*)node->lr[0];
+    RegisterTreeItem* rightItem = (RegisterTreeItem*)(const void*)node->lr[1];
+
+    updateIndexToNodeMap( instance, leftItem, index );
+    updateIndexToNodeMap( instance, rightItem, index );
+}
+
+bool serializeAndWriteTree( RegisterTreeItem* item, uint32_t* address )
+{
+    if ( item == NULL || address == NULL )
+    {
+        return true;
+    }
+
+    size_t size = sizeof( serializeBuffer );
+    mattfair_storage_Register_1_0_serialize_( &item->value, serializeBuffer, &size );
+    assert( size <= sizeof( serializeBuffer ) );
+    if ( flash_write( serializeBuffer, *address, size ) != FLASH_OK )
+    {
+        return false;
+    }
+    *address += size;
+
+    RegisterTreeNode* node = &item->base;
+    RegisterTreeItem* leftItem = (RegisterTreeItem*)(const void*)node->lr[0];
+    RegisterTreeItem* rightItem = (RegisterTreeItem*)(const void*)node->lr[1];
+
+    if ( !serializeAndWriteTree( leftItem, address ) )
+    {
+        return false;
+    }
+    return serializeAndWriteTree( rightItem, address );
+}
+
+RegisterInstance* RegisterInit( uint32_t start_addr, size_t count, O1HeapInstance* heap, RegisterMemoryAllocate memory_allocate, RegisterMemoryFree memory_free)
+{
+    RegisterInstance* inst = (RegisterInstance*)malloc( sizeof( RegisterInstance ) );
+    assert( inst != NULL );
+
+    RegisterState* state = malloc( sizeof( RegisterState ) );
+    state->register_start_addr = start_addr;
+    state->register_size = mattfair_storage_Register_1_0_SERIALIZATION_BUFFER_SIZE_BYTES_;
+    state->memory_size = state->register_size * count;
+    state->register_end_addr = start_addr + count * state->register_size;
+    state->max_register_count = count;
+
+    inst->user_reference = state;
+
+    inst->registersByName.size = 0;
+    inst->registersByName.capacity = count;
+    inst->registersByName.root = NULL;
+
+    inst->registersByIndex = (uint32_t*)malloc( sizeof( uint32_t ) * count );
+
+    inst->memory_allocate = memory_allocate;
+    inst->memory_free = memory_free;
+    inst->heap = heap;
+    assert( inst->heap != NULL );
+
+    flash_init( state->register_start_addr, state->memory_size );
+
+    // RegisterFactoryReset(inst);
+    ReadRegisters( inst );
+    printTreeNode( inst->registersByName.root );
+
+    return inst;
+}
+
+void RegisterDestroy( RegisterInstance* inst )
+{
+    clearTree( inst, &inst->registersByName );
+
+    flash_destroy();
+    free( inst->registersByIndex );
+    free( (RegisterState*)inst->user_reference );
+    free( inst );
+}
+
+void ReadRegisters( RegisterInstance* inst )
+{
+    // Read the registers from flash memory
+    uint32_t address = flash_get_addr();
+    uint32_t endAddress = address + flash_get_size();
+    FlashRegister reg = { 0 };
+    size_t size = RegisterSize( inst );
+    while ( address < endAddress )
+    {
+        if ( flash_read( &reg, address, size, DeserializeFlashRegister ) != FLASH_OK )
+        {
+            printf( "Failed to read register at address %d\r\n", address );
+            break;
+        }
+        if ( reg.name.name.count == 255 && reg.name.name.elements[0] == 255 )
+        {
+            printf( "End of registers\r\n" );
             break;
         }
 
         printf( "Register %.*s\r\n", reg.name.name.count, reg.name.name.elements );
-        registerNames[register_count] = reg.name;
-        registerImmutable[register_count] = reg.isImmutable;
-        register_count++;
+
+        registerPush( inst, &reg );
+        address += size;
     }
 }
 
-uint32_t RegisterStartAddress()
+uint32_t RegisterStartAddress( RegisterInstance* inst )
 {
-    return register_start_addr;
+    RegisterState* state = (RegisterState*)inst->user_reference;
+    return state->register_start_addr;
 }
-uint32_t RegisterEndAddress()
+uint32_t RegisterEndAddress( RegisterInstance* inst )
 {
-    return register_end_addr;
-}
-
-size_t RegisterSize()
-{
-    return register_size;
+    RegisterState* state = (RegisterState*)inst->user_reference;
+    return state->register_end_addr;
 }
 
-size_t RegisterCount()
+size_t RegisterSize( RegisterInstance* inst )
 {
-    return register_count;
+    RegisterState* state = (RegisterState*)inst->user_reference;
+    return state->register_size;
 }
 
-bool RegisterWrite( const char* name, const uavcan_register_Value_1_0* value, bool immutable )
+size_t RegisterCount( RegisterInstance* inst )
 {
-    RegisterIndex index = FindRegisterIndex( name );
-    if ( index.status == VALID )
+    return inst->registersByName.size;
+}
+
+bool RegisterAdd( RegisterInstance* inst, const char* name, const uavcan_register_Value_1_0* value, bool immutable )
+{
+    FlashRegister reg = { 0 };
+    reg.name.name.count = strlen( name );
+    memcpy( reg.name.name.elements, name, reg.name.name.count );
+    reg.value = *value;
+    reg.isImmutable = immutable;
+
+    if ( registerPush( inst, &reg ) < 0 )
     {
-        if ( registerImmutable[index.value] )
-        {
-            printf( "Attempt to write immutable register %s denied\r\n", name );
-            return false;
-        }
-    }
-    else if ( index.status == REGISTER_NOT_FOUND )
-    {
-        index.status = VALID;
-        index.value = register_count++;
-    }
-
-    uavcan_register_Name_1_0* storedName = &registerNames[index.value];
-    uavcan_register_Name_1_0_initialize_( storedName );
-    storedName->name.count = strlen( name );
-    memset( storedName->name.elements, 0, sizeof( storedName->name.elements ) );
-    memcpy( storedName->name.elements, name, storedName->name.count );
-    registerImmutable[index.value] = immutable;
-
-    FlashRegister reg = { .name = *storedName, .value = *value, .isImmutable = immutable };
-
-    size_t size = mattfair_storage_Register_1_0_SERIALIZATION_BUFFER_SIZE_BYTES_;
-    memset( serializeBuffer, 0, size );
-    if ( mattfair_storage_Register_1_0_serialize_( &reg, serializeBuffer, &size ) != NUNAVUT_SUCCESS )
-    {
-        return false;
-    }
-
-    flash_unlock();
-    bool success = flash_write( serializeBuffer, GetOffsetAddress( index.value ), RegisterSize() ) == FLASH_OK;
-    flash_lock();
-
-    if ( !success )
-    {
-        printf( "Failed to write register %s\r\n", name );
+        printf( "Failed to push register %s\r\n", name );
         return false;
     }
 
     return true;
 }
 
-RegisterIndex FindRegisterIndex( const char* name )
+bool RegisterFlush( RegisterInstance* inst )
 {
-    RegisterIndex notFound = { .status = REGISTER_NOT_FOUND };
-    if ( register_count == 0 )
+    // Write the register to flash memory
+    if ( flash_unlock() != FLASH_OK )
     {
-        return notFound;
+        printf( "Could not unlock flash memory\r\n" );
+        return false;
     }
-
-    for ( uint32_t i = 0; i < register_count; i++ )
+    if ( flash_erase() == FLASH_OK )
     {
-        uavcan_register_Name_1_0* regName = &registerNames[i];
-        if ( strncmp( (const char*)regName->name.elements, name, strlen( name ) ) == 0 )
+        RegisterTreeItem* rootItem = (RegisterTreeItem*)(void*)inst->registersByName.root;
+        uint32_t address = flash_get_addr();
+        bool success = serializeAndWriteTree( rootItem, &address );
+        flash_lock();
+
+        if ( !success )
         {
-            printf( "Found Name: %s, Index: %d\r\n", name, (int)i );
-            RegisterIndex found = { .value = i };
-            return found;
+            printf( "Failed to serialize registers to flash memory\r\n" );
+            return false;
         }
     }
-
-    return notFound;
+    return true;
 }
 
 int8_t DeserializeFlashRegister( void* const out_obj, const uint8_t* buffer, size_t* const inout_buffer_size_bytes )
@@ -189,64 +369,77 @@ int8_t DeserializeFlashRegister( void* const out_obj, const uint8_t* buffer, siz
     return mattfair_storage_Register_1_0_deserialize_( out_obj, buffer, inout_buffer_size_bytes );
 }
 
-bool RegisterRead( const char* name, FlashRegister* regOut )
+bool RegisterRead( RegisterInstance* inst, const char* name, FlashRegister* regOut )
 {
-    RegisterIndex index = FindRegisterIndex( name );
-    if ( index.status == REGISTER_NOT_FOUND )
+    printTreeNode( inst->registersByName.root );
+    RegisterTreeItem* item = (RegisterTreeItem*)(void*)cavlSearch(
+        &inst->registersByName.root, (void*)name, &searchByNameAVLPredicate, NULL );
+
+    if ( item == NULL )
     {
         return false;
     }
 
-    if ( flash_read( regOut, GetOffsetAddress( index.value ), RegisterSize(), DeserializeFlashRegister ) != FLASH_OK )
-    {
-        return false;
-    }
-
+    *regOut = item->value;
     return true;
 }
 
-bool RegisterReadByIndex( uint32_t index, FlashRegister* regOut )
+const RegisterTreeItem* getItemByIndex( RegisterInstance* inst, uint32_t index )
 {
-    uint32_t address = GetOffsetAddress( index );
+    if ( index >= inst->registersByName.size )
+    {
+        printf( "Could not find register at index %d\r\n", index );
+        return NULL;
+    }
 
-    if ( flash_read( regOut, address, RegisterSize(), DeserializeFlashRegister ) == FLASH_ERROR )
+    return (const RegisterTreeItem*)(void*)inst->registersByIndex[index];
+}
+
+bool RegisterReadByIndex( RegisterInstance* inst, uint32_t index, FlashRegister* regOut )
+{
+    const RegisterTreeItem* item = getItemByIndex( inst, index );
+
+    if ( item == NULL )
     {
         return false;
     }
 
+    printf( "Found register %.*s at index %d\r\n", item->value.name.name.count, item->value.name.name.elements, index );
+
+    *regOut = item->value;
     return true;
 }
 
-uavcan_register_Name_1_0 RegisterNameByIndex( const uint16_t index )
+uavcan_register_Name_1_0 RegisterNameByIndex( RegisterInstance* inst, const uint16_t index )
 {
-    if ( index >= register_count )
+    FlashRegister reg = { 0 };
+    if ( RegisterReadByIndex( inst, index, &reg ) )
     {
-        uavcan_register_Name_1_0 empty = { 0 };
-        return empty;
+        return reg.name;
     }
 
-    return registerNames[index];
+    return ( uavcan_register_Name_1_0 ){ 0 };
 }
 
-uint32_t GetOffsetAddress( uint32_t index )
+uint32_t GetOffsetAddress( RegisterInstance* inst, uint32_t index )
 {
-    return register_start_addr + index * register_size;
+    RegisterState* state = (RegisterState*)inst->user_reference;
+    return state->register_start_addr + index * state->register_size;
 }
 
 // Erase all registers such that the defaults are used at the next launch.
-void RegisterFactoryReset( void )
+void RegisterFactoryReset( RegisterInstance* inst )
 {
     if ( flash_unlock() != FLASH_OK )
     {
         printf( "Could not unlock flash memory\r\n" );
+        return;
     }
 
     // if we failed to erase the flash memory, don't clear things
     if ( flash_erase() == FLASH_OK )
     {
-        memset( registerNames, 0, max_register_count * uavcan_register_Name_1_0_SERIALIZATION_BUFFER_SIZE_BYTES_ );
-        memset( registerImmutable, 0, max_register_count * sizeof( bool ) );
-        register_count = 0;
+        clearTree( inst, &inst->registersByName );
     }
     else
     {
@@ -304,4 +497,40 @@ bool RegisterAssign( uavcan_register_Value_1_0* const dst, const uavcan_register
     REGISTER_CASE_SAME_TYPE( real32 )
     REGISTER_CASE_SAME_TYPE( real16 )
     return false;
+}
+
+void PrintValue( const uavcan_register_Value_1_0* value )
+{
+    if ( uavcan_register_Value_1_0_is_natural16_( value ) )
+    {
+        printf( "Value: %d\r\n", value->natural16.value.elements[0] );
+    }
+    else if ( uavcan_register_Value_1_0_is_natural32_( value ) )
+    {
+        printf( "Value: %d\r\n", value->natural32.value.elements[0] );
+    }
+    else if ( uavcan_register_Value_1_0_is_natural64_( value ) )
+    {
+        printf( "Value: %lld\r\n", value->natural64.value.elements[0] );
+    }
+    else if ( uavcan_register_Value_1_0_is_real32_( value ) )
+    {
+        printf( "Value: %f\r\n", (double)value->real32.value.elements[0] );
+    }
+    else if ( uavcan_register_Value_1_0_is_real64_( value ) )
+    {
+        printf( "Value: %f\r\n", value->real64.value.elements[0] );
+    }
+    else if ( uavcan_register_Value_1_0_is_string_( value ) )
+    {
+        printf( "Value: %.*s\r\n", value->_string.value.count, value->_string.value.elements );
+    }
+    else if ( uavcan_register_Value_1_0_is_empty_( value ) )
+    {
+        printf( "Value: <empty>\r\n" );
+    }
+    else
+    {
+        printf( "Value: <unsupported>\r\n" );
+    }
 }

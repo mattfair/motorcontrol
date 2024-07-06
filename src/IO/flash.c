@@ -34,7 +34,7 @@ uint32_t flash_get_size( void )
     return flash_state.end_addr - flash_state.start_addr;
 }
 
-FlashStatus flash_erase( void )
+FlashStatus flash_erase_impl( void )
 {
     FLASH_EraseInitTypeDef erase_init_struct;
     erase_init_struct.TypeErase = FLASH_TYPEERASE_SECTORS;
@@ -62,6 +62,7 @@ FlashStatus flash_erase( void )
 
     return FLASH_OK;
 }
+FlashStatus (*flash_erase)( void ) = flash_erase_impl;
 
 void flash_clear_flags_impl( void )
 {
@@ -105,8 +106,16 @@ FlashStatus flash_read( void* data, uint32_t address, size_t size, DeSerializeFu
 
     if ( deserialize )
     {
-        void* source = (void*)address;
-        deserialize( data, source, &size );
+        uint8_t* source = (void*)address;
+        size_t sourceSize = size;
+        deserialize( data, source, &sourceSize);
+
+        printf("read from flash: ");
+        for( size_t i = 0; i < sourceSize; i++ )
+        {
+            printf( "%02x ", source[i] );
+        }
+        printf("\r\n");
     }
     else
     {
@@ -124,13 +133,16 @@ FlashStatus flash_write( void* data, uint32_t address, size_t size )
     }
 
     const uint8_t* data_ptr = (const uint8_t*)data;
+    printf("write to flash: ");
     for ( size_t i = 0; i < size; i++ )
     {
-        //printf( "data_ptr[%d]: %d\n", i, data_ptr[i] );
+        printf( "%02x ", data_ptr[i] );
         if ( HAL_FLASH_Program( FLASH_TYPEPROGRAM_BYTE, address + i, data_ptr[i] ) != HAL_OK )
         {
             return FLASH_ERROR;
         }
     }
+
+    printf("\r\n");
     return FLASH_OK;
 }

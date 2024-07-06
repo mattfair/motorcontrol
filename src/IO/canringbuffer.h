@@ -7,7 +7,7 @@
 #include "canard.h"
 #include "stm32f4xx_hal.h"
 
-#define RING_BUFFER_SIZE 32
+#define RING_BUFFER_SIZE 32u
 
 typedef struct
 {

@@ -24,7 +24,8 @@
 #define __MAIN_H
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
 /* Includes ------------------------------------------------------------------*/
@@ -47,27 +48,27 @@ extern "C" {
 #include <uavcan/pnp/NodeIDAllocationData_1_0.h>
 #include "canard.h"
 
-/* USER CODE END Includes */
+    /* USER CODE END Includes */
 
-/* Exported types ------------------------------------------------------------*/
-/* USER CODE BEGIN ET */
+    /* Exported types ------------------------------------------------------------*/
+    /* USER CODE BEGIN ET */
     // forward declare state struct
     typedef struct State State;
 
-/* USER CODE END ET */
+    /* USER CODE END ET */
 
-/* Exported constants --------------------------------------------------------*/
-/* USER CODE BEGIN EC */
+    /* Exported constants --------------------------------------------------------*/
+    /* USER CODE BEGIN EC */
 
-/* USER CODE END EC */
+    /* USER CODE END EC */
 
-/* Exported macro ------------------------------------------------------------*/
-/* USER CODE BEGIN EM */
+    /* Exported macro ------------------------------------------------------------*/
+    /* USER CODE BEGIN EM */
 
-/* USER CODE END EM */
+    /* USER CODE END EM */
 
-/* Exported functions prototypes ---------------------------------------------*/
-void Error_Handler(void);
+    /* Exported functions prototypes ---------------------------------------------*/
+    void Error_Handler( void );
 
 /* USER CODE BEGIN EFP */
 
@@ -87,7 +88,7 @@ void Error_Handler(void);
 #define SWO_Pin GPIO_PIN_3
 #define SWO_GPIO_Port GPIOB
 
-/* USER CODE BEGIN Private defines */
+    /* USER CODE BEGIN Private defines */
 
 #define KILO 1000L
 #define MEGA ( (int64_t)KILO * KILO )
@@ -95,27 +96,22 @@ void Error_Handler(void);
     CanardMicrosecond GetMonotonicMicroseconds( void );
     const char* PortToName( const CanardPortID port_id );
     const char* KindToName( const CanardTransferKind kind );
-    void ProcessMessageServoSetpoint( State* const state,
-                                      const reg_udral_physics_dynamics_translation_Linear_0_1* const msg );
-    void ProcessMessageServiceReadiness( State* const state,
-                                         const reg_udral_service_common_Readiness_0_1* const msg,
+    void ProcessMessageServoSetpoint( const reg_udral_physics_dynamics_translation_Linear_0_1* const msg );
+    void ProcessMessageServiceReadiness( const reg_udral_service_common_Readiness_0_1* const msg,
                                          const CanardMicrosecond monotonic_time );
-    void ProcessMessagePlugAndPlayNodeIDAllocation( State* const state,
-                                                    const uavcan_pnp_NodeIDAllocationData_1_0* const msg );
-    void ProcessMessagePlugAndPlayNodeIDAllocation( State* const state,
-                                                    const uavcan_pnp_NodeIDAllocationData_1_0* const msg );
+    void ProcessMessagePlugAndPlayNodeIDAllocation( const uavcan_pnp_NodeIDAllocationData_1_0* const msg );
+    void ProcessMessagePlugAndPlayNodeIDAllocation( const uavcan_pnp_NodeIDAllocationData_1_0* const msg );
     uavcan_node_GetInfo_Response_1_0 ProcessRequestNodeGetInfo();
     uavcan_register_Access_Response_1_0 ProcessRequestRegisterAccess( const uavcan_register_Access_Request_1_0* req );
     uavcan_node_ExecuteCommand_Response_1_1 ProcessRequestExecuteCommand(
         const uavcan_node_ExecuteCommand_Request_1_1* req );
 
-    void Send( State* const state,
-               const CanardMicrosecond tx_deadline_usec,
+    void Send( const CanardMicrosecond tx_deadline_usec,
                const CanardTransferMetadata* const metadata,
                const size_t payload_size,
                const void* const payload );
 
-/* USER CODE END Private defines */
+    /* USER CODE END Private defines */
 
 #ifdef __cplusplus
 }

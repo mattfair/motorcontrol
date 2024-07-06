@@ -8,17 +8,18 @@
 #ifndef STRUCTS_H
 #define STRUCTS_H
 
+#include <o1heap.h>
 #include <stdint.h>
+#include "IO/canringbuffer.h"
+#include "IO/register.h"
 #include "adc.h"
 #include "calibration.h"
 #include "can.h"
 #include "canard.h"
-#include "IO/canringbuffer.h"
 #include "drv8323.h"
 #include "foc.h"
 #include "fsm.h"
 #include "gpio.h"
-#include "o1heap.h"
 #include "position_sensor.h"
 #include "preference_writer.h"
 #include "spi.h"
@@ -39,10 +40,12 @@ typedef struct State
     CanardMicrosecond started_at;
 
     O1HeapInstance* heap;
+    RegisterInstance* regInstance;
     CanardInstance canard;
     CanardTxQueue canard_tx_queues[CAN_REDUNDANCY_FACTOR];
     CAN_HandleTypeDef canbus[CAN_REDUNDANCY_FACTOR];
     CanRingBuffer can_rx_buffer[CAN_REDUNDANCY_FACTOR];
+    bool flash_register_stale;
 
     /// The state of the business logic.
     struct

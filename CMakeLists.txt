@@ -66,7 +66,9 @@ file(GLOB_RECURSE STM32_DRIVER_HEADER_FILES "${CMAKE_SOURCE_DIR}/src/Drivers/*.h
 list(APPEND HEADER_FILES ${STM32_DRIVER_HEADER_FILES})
 
 # Initialize an empty list to hold include directories
-set(INCLUDE_DIRS)
+set(INCLUDE_DIRS
+  ${CMAKE_SOURCE_DIR}/submodules/o1heap/o1heap
+)
 
 # Extract directory paths from each header file
 foreach(HEADER ${HEADER_FILES})
@@ -239,12 +241,22 @@ set(IO_SRC
 )
 
 add_library(io ${IO_SRC})
-target_include_directories(io PRIVATE ${INCLUDE_DIRS})
+target_include_directories(io PRIVATE 
+  ${INCLUDE_DIRS} 
+)
+target_link_libraries(io PRIVATE o1heap)
 add_dependencies(io dsdl-regulated dsdl-non-standard dsdl-mattfair nunavut-support)
 target_compile_options(io PRIVATE
   -Wno-error=missing-declarations
   -Wno-error=unused-variable
   -Wno-error=unused-parameter
+)
+
+add_library(o1heap 
+  "${CMAKE_SOURCE_DIR}/submodules/o1heap/o1heap/o1heap.c"
+)
+target_include_directories(o1heap PRIVATE 
+  ${CMAKE_SOURCE_DIR}/submodules/o1heap/o1heap
 )
 
 if(BUILD_TESTS)
@@ -413,7 +425,10 @@ if(BUILD_TESTS)
     )
 
     create_test_with_coverage(io_flash_test tests/IO/flash_test.c io mock_hal_driver)
-    create_test_with_coverage(io_register_test tests/IO/register_test.c io mock_hal_driver)
+    create_test_with_coverage(io_register_test tests/IO/register_test.c io mock_hal_driver o1heap)
+    target_include_directories(io_register_test PRIVATE 
+      ${INCLUDE_DIRS} 
+    )
 
     # Custom target to run all tests with ctest --output-on-failure
     add_custom_target(run_tests
@@ -569,7 +584,7 @@ else()
     # arm target
     add_executable(arm_motorcontrol ${PROJECT_SOURCES} "${CMAKE_SOURCE_DIR}/src/Core/Src/main.c")
     target_include_directories(arm_motorcontrol PRIVATE ${INCLUDE_DIRS})
-    target_link_libraries(arm_motorcontrol PRIVATE io)
+    target_link_libraries(arm_motorcontrol PRIVATE io o1heap)
     set_target_properties(arm_motorcontrol PROPERTIES
         C_COMPILER arm-none-eabi-gcc
         CXX_COMPILER arm-none-eabi-g++
