@@ -10,6 +10,8 @@
 static uint8_t flash_data[mattfair_storage_Register_1_0_SERIALIZATION_BUFFER_SIZE_BYTES_ * NUM_REGISTERS];
 uint32_t address_ptr = (uint32_t)flash_data;
 
+_Alignas( O1HEAP_ALIGNMENT ) static uint8_t heap_arena[1024 * 50] = { 0 };
+
 // callback function to make HAL_FLASH_Program write to flash_data
 static HAL_StatusTypeDef CallbackReturn = HAL_OK;
 HAL_StatusTypeDef HAL_FLASH_Program_Callback( uint32_t TypeProgram,
@@ -42,6 +44,7 @@ FlashStatus mock_flash_erase( void )
 }
 
 RegisterInstance* instance;
+O1HeapInstance* heap;
 
 static void* RegisterAllocate( RegisterInstance* const ins, const size_t amount )
 {
@@ -51,6 +54,7 @@ static void* RegisterAllocate( RegisterInstance* const ins, const size_t amount 
 
 static void RegisterFree( RegisterInstance* const ins, void* const pointer )
 {
+    printf( "Freeing item: %p\r\n", (void*)pointer );
     o1heapFree( ins->heap, pointer );
 }
 
@@ -83,6 +87,8 @@ void setUp( void )
     }
     CallbackReturn = HAL_OK;
 
+    heap = o1heapInit( heap_arena, sizeof( heap_arena ) );
+
     HAL_FLASH_Program_AddCallback( HAL_FLASH_Program_Callback );
     address_ptr = (uint32_t)flash_data;
 
@@ -92,7 +98,7 @@ void setUp( void )
     flash_erase = mock_flash_erase;
 
     uint32_t address = (uint32_t)flash_data;
-    instance = RegisterInit( address, NUM_REGISTERS, RegisterAllocate, RegisterFree );
+    instance = RegisterInit( address, NUM_REGISTERS, heap, RegisterAllocate, RegisterFree );
 }
 
 void tearDown( void )
@@ -141,8 +147,9 @@ void add_natural_32( const char* name, uint32_t value, bool isImmutable )
     WriteFlashBytesExpectAndReturn( buffer, bufferSize, HAL_OK );
     HAL_FLASH_Lock_ExpectAndReturn( HAL_OK );
 
-    TEST_ASSERT_TRUE_MESSAGE( RegisterWrite( instance, name, &reg.value, isImmutable ),
+    TEST_ASSERT_TRUE_MESSAGE( RegisterAdd( instance, name, &reg.value, isImmutable ),
                               "Failed to write natural32 register" );
+    TEST_ASSERT_TRUE( RegisterFlush( instance ) );
     // dump_flash_data_to_file();
 }
 
@@ -174,7 +181,8 @@ void AddRegisterReal64Value( const char* name, double value )
     WriteFlashBytesExpectAndReturn( buffer, bufferSize, HAL_OK );
     HAL_FLASH_Lock_ExpectAndReturn( HAL_OK );
 
-    TEST_ASSERT_TRUE_MESSAGE( RegisterWrite( instance, name, &reg.value, false ), "Failed to write real64 register" );
+    TEST_ASSERT_TRUE_MESSAGE( RegisterAdd( instance, name, &reg.value, false ), "Failed to write real64 register" );
+    TEST_ASSERT_TRUE( RegisterFlush( instance ) );
     // dump_flash_data_to_file();
 }
 
@@ -196,7 +204,8 @@ void AddRegisterStringValue( const char* name, const char* value )
     WriteFlashBytesExpectAndReturn( buffer, bufferSize, HAL_OK );
     HAL_FLASH_Lock_ExpectAndReturn( HAL_OK );
 
-    TEST_ASSERT_TRUE_MESSAGE( RegisterWrite( instance, name, &reg.value, false ), "Failed to write string register" );
+    TEST_ASSERT_TRUE_MESSAGE( RegisterAdd( instance, name, &reg.value, false ), "Failed to write string register" );
+    TEST_ASSERT_TRUE( RegisterFlush( instance ) );
     // dump_flash_data_to_file();
 }
 
@@ -233,7 +242,7 @@ void test_write_fail( void )
 
     CallbackReturn = HAL_ERROR;
     uavcan_register_Value_1_0 value = { 0 };
-    TEST_ASSERT_FALSE( RegisterWrite( instance, "test", &value, false ) );
+    TEST_ASSERT_FALSE( RegisterAdd( instance, "test", &value, false ) );
 }
 
 void test_write_lock_fail( void )
@@ -250,7 +259,7 @@ void test_write_lock_fail( void )
 
     HAL_FLASH_Unlock_ExpectAndReturn( HAL_ERROR );
     uavcan_register_Value_1_0 value = { 0 };
-    TEST_ASSERT_FALSE( RegisterWrite( instance, "test", &value, false ) );
+    TEST_ASSERT_FALSE( RegisterAdd( instance, "test", &value, false ) );
 }
 
 void test_single_write_increments_count( void )
@@ -270,7 +279,7 @@ void test_single_write_increments_count( void )
     HAL_FLASH_Lock_ExpectAndReturn( HAL_OK );
 
     uavcan_register_Value_1_0 value = { 0 };
-    TEST_ASSERT_TRUE( RegisterWrite( instance, "test", &value, false ) );
+    TEST_ASSERT_TRUE( RegisterAdd( instance, "test", &value, false ) );
     TEST_ASSERT_EQUAL( 1, RegisterCount( instance ) );
 }
 
@@ -529,7 +538,7 @@ void test_create_immutable_register( void )
     memset( buffer, 0, bufferSize );
     mattfair_storage_Register_1_0_serialize_( &reg, buffer, &bufferSize );
 
-    TEST_ASSERT_FALSE( RegisterWrite( instance, name, &reg.value, false ) );
+    TEST_ASSERT_FALSE( RegisterAdd( instance, name, &reg.value, false ) );
 }
 
 void test_factory_reset( void )
@@ -594,6 +603,24 @@ void test_load_on_startup( void )
 
     // reinitialize
     uintptr_t address = (uintptr_t)flash_data;
-    RegisterInstance* newInit = RegisterInit( address, 100, RegisterAllocate, RegisterFree );
+    RegisterInstance* newInit = RegisterInit( address, NUM_REGISTERS, heap, RegisterAllocate, RegisterFree );
     TEST_ASSERT_EQUAL( 5, RegisterCount( newInit ) );
+}
+
+void test_update_value( void )
+{
+    const char* name = "answer_to_everything";
+    int answer = 42;
+    AddRegisterNatural32Value( name, answer );
+
+    FlashRegister read = { 0 };
+    TEST_ASSERT_TRUE( RegisterRead( instance, name, &read ) );
+    TEST_ASSERT_EQUAL( answer, read.value.natural32.value.elements[0] );
+
+    int newAnswer = 123456789;
+    AddRegisterNatural32Value( name, newAnswer );
+
+    FlashRegister newRead = { 0 };
+    TEST_ASSERT_TRUE( RegisterRead( instance, name, &newRead ) );
+    TEST_ASSERT_EQUAL_MESSAGE( newAnswer, newRead.value.natural32.value.elements[0], "value did not update" );
 }

@@ -209,7 +209,7 @@ const char* PortToName( const CanardPortID port_id )
     {
         return "reg.udral.physics.dynamics.translation.LinearTs";
     }
-    
+
     printf( "Unknown port_id: %d\r\n", port_id );
     return "Unknown";
 }
@@ -301,7 +301,7 @@ static CanardPortID GetSubjectID( const SubjectRole role, const char* const port
     // Deduce the register name from port name.
     const char* const role_name = ( role == SUBJECT_ROLE_PUBLISHER ) ? "pub" : "sub";
     char register_name[uavcan_register_Name_1_0_name_ARRAY_CAPACITY_] = { 0 };
-    snprintf( &register_name[0], sizeof( register_name ), "uavcan.%s.%s.id", role_name, port_name );
+    snprintf( register_name, sizeof( register_name ), "uavcan.%s.%s.id", role_name, port_name );
 
     // Set up the default value. It will be used to populate the register if it
     // doesn't exist.
@@ -329,20 +329,25 @@ static CanardPortID GetSubjectID( const SubjectRole role, const char* const port
     // type exposed at this port. It should be immutable, but it is not strictly
     // required so in this implementation we take shortcuts by making it mutable
     // since it's behaviorally simpler in this specific case.
+    /*
     snprintf( register_name, sizeof( register_name ), "uavcan.%s.%s.type", role_name, port_name );
     memset( &reg, 0, sizeof( reg ) );
-    uavcan_register_Value_1_0_select_string_( &reg.value );
-    reg.value._string.value.count =
-        nunavutChooseMin( strlen( type_name ), uavcan_primitive_String_1_0_value_ARRAY_CAPACITY_ );
-    memcpy( reg.value._string.value.elements, type_name, reg.value._string.value.count );
-
     if ( !RegisterRead( servo_state.regInstance, register_name, &reg ) )
     {
+        uavcan_register_Value_1_0_select_string_( &reg.value );
+        reg.value._string.value.count =
+            nunavutChooseMin( strlen( type_name ), uavcan_primitive_String_1_0_value_ARRAY_CAPACITY_ );
+        memcpy( reg.value._string.value.elements, type_name, reg.value._string.value.count );
+
+        printf( "Register %s does not exist, creating with default value %s\r\n", register_name, type_name );
+        PrintValue( &reg.value );
+
         if ( RegisterAdd( servo_state.regInstance, register_name, &reg.value, true ) )
         {
             servo_state.flash_register_stale = true;
         }
     }
+    */
 
     return result;
 }
@@ -619,20 +624,6 @@ static void HandleOneHzLoop( const CanardMicrosecond monotonic_time )
             }
         }
 
-        if ( servo_state.flash_register_stale )
-        {
-            printf( "Flushing register to flash..." );
-            servo_state.flash_register_stale = false;
-            if ( RegisterFlush( servo_state.regInstance ) )
-            {
-                printf( "done.\r\n" );
-            }
-            else
-            {
-                printf( "failed.\r\n" );
-            }
-        }
-
         // Disarm automatically if the arming subject has not been updated in a while.
         if ( servo_state.servo.arming.armed &&
              ( ( monotonic_time - servo_state.servo.arming.last_update_at ) >
@@ -640,6 +631,21 @@ static void HandleOneHzLoop( const CanardMicrosecond monotonic_time )
         {
             servo_state.servo.arming.armed = false;
             puts( "Disarmed by timeout " );
+        }
+    }
+
+    // Flush registers to flash if it's stale.
+    if ( servo_state.flash_register_stale )
+    {
+        printf( "Flushing registers to flash...\r\n" );
+        servo_state.flash_register_stale = false;
+        if ( RegisterFlush( servo_state.regInstance ) )
+        {
+            printf( "done.\r\n" );
+        }
+        else
+        {
+            printf( "failed flushing to flash.\r\n" );
         }
     }
 }
@@ -794,10 +800,16 @@ void ProcessMessagePlugAndPlayNodeIDAllocation( const uavcan_pnp_NodeIDAllocatio
         if ( RegisterAdd( servo_state.regInstance, "uavcan.node.id", &reg, false ) )
         {
             servo_state.flash_register_stale = true;
+            printf( "Stored node-ID in the register\r\n" );
+
+            // We no longer need the subscriber, drop it to free up the resources (both memory and CPU time).
+            (void)canardRxUnsubscribe(
+                &servo_state.canard, CanardTransferKindMessage, uavcan_pnp_NodeIDAllocationData_1_0_FIXED_PORT_ID_ );
         }
-        // We no longer need the subscriber, drop it to free up the resources (both memory and CPU time).
-        (void)canardRxUnsubscribe(
-            &servo_state.canard, CanardTransferKindMessage, uavcan_pnp_NodeIDAllocationData_1_0_FIXED_PORT_ID_ );
+        else
+        {
+            printf( "Failed to update node-ID\r\n" );
+        }
     }
     // Otherwise, ignore it: either it is a request from another node or it is a response to another node.
 }
@@ -884,15 +896,22 @@ uavcan_register_Access_Response_1_0 ProcessRequestRegisterAccess( const uavcan_r
             immutable = originalRegistry.isImmutable;
         }
 
-        printf( "Writing register %s \r\n", name );
-        PrintValue( &req->value );
-        if ( RegisterAdd( servo_state.regInstance, name, &req->value, immutable ) )
+        if ( !immutable )
         {
-            servo_state.flash_register_stale = true;
+            printf( "Writing register %s \r\n", name );
+            PrintValue( &req->value );
+            if ( RegisterAdd( servo_state.regInstance, name, &req->value, immutable ) )
+            {
+                servo_state.flash_register_stale = true;
+            }
+            else
+            {
+                printf( "Failed to write register %s \r\n", name );
+            }
         }
         else
         {
-            printf( "Failed to write register %s \r\n", name );
+            printf( "register %s is immutable \r\n", name );
         }
     }
 
@@ -1133,6 +1152,7 @@ static void ProcessReceivedTransfer( const CanardRxTransfer* const transfer )
 
             if ( uavcan_register_Access_Request_1_0_deserialize_( &req, transfer->payload, &size ) >= 0 )
             {
+                /*
                 printf( "Deserialized request size: %u\r\n", size );
                 uint8_t* reqPtr = (uint8_t*)&req;
                 for ( size_t i = 0; i < size; ++i )
@@ -1144,22 +1164,25 @@ static void ProcessReceivedTransfer( const CanardRxTransfer* const transfer )
                 printf( "Processing register access request...\r\n" );
                 printf( "Name: %.*s \r\n", req.name.name.count, req.name.name.elements );
                 PrintValue( &req.value );
+                */
 
                 const uavcan_register_Access_Response_1_0 resp = ProcessRequestRegisterAccess( &req );
 
                 // Verify the response before serialization
-                printf( "Response value: " );
-                PrintValue( &resp.value );
+                // printf( "Response value: " );
+                // PrintValue( &resp.value );
 
                 size_t responseSize = sizeof( serializeBuffer );
                 if ( uavcan_register_Access_Response_1_0_serialize_( &resp, serializeBuffer, &responseSize ) >= 0 )
                 {
+                    /*
                     printf( "Serialized response size: %u\r\n", responseSize );
                     for ( size_t i = 0; i < responseSize; ++i )
                     {
                         printf( "%02x ", serializeBuffer[i] );
                     }
-                    printf( "\n" );
+                    printf( "\r\n" );
+                    */
 
                     SendResponse( transfer, responseSize, serializeBuffer );
                 }
@@ -1282,7 +1305,6 @@ void ProcessCanMessages( uint8_t ifidx )
         if ( canard_result > 0 )
         {
             ProcessReceivedTransfer( &transfer );
-            servo_state.canard.memory_free( &servo_state.canard, (void*)transfer.payload );
         }
         else if ( canard_result == 0 )
         {
@@ -1300,6 +1322,9 @@ void ProcessCanMessages( uint8_t ifidx )
             // no other error can be possible
             assert( false );
         }
+
+        // The received payload can be released after processing
+        servo_state.canard.memory_free( &servo_state.canard, (void*)transfer.payload );
     }
 }
 
@@ -1555,7 +1580,8 @@ int main( void )
     servo_state.canard.user_reference = &servo_state;  // Make the state reachable from the canard instance.
 
     // compute the number of registers that can be stored in flash
-    servo_state.regInstance = RegisterInit( FLASH_USER_START_ADDR, 25, servo_state.heap, &RegisterAllocate, &RegisterFree );
+    servo_state.regInstance =
+        RegisterInit( FLASH_USER_START_ADDR, 25, servo_state.heap, &RegisterAllocate, &RegisterFree );
     for ( int ifidx = 0; ifidx < CAN_REDUNDANCY_FACTOR; ifidx++ )
     {
         CanRingBuffer_Init( &servo_state.can_rx_buffer[ifidx] );

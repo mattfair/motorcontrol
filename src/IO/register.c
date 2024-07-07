@@ -58,7 +58,6 @@ void clearTree( RegisterInstance* inst, RegisterTree* tree )
             break;
         }
         RegisterTreeItem* item = registerPop( tree, root );
-        printf( "Freeing item: %p\r\n", (void*)item );
         inst->memory_free( inst, item );
     }
 }
@@ -131,20 +130,23 @@ int32_t registerPush( RegisterInstance* inst, FlashRegister* reg )
     {
         // Insert the newly created register item into the proper AVL trees.
 
-        printf( "Name Before:\r\n" );
-        printTreeNode( inst->registersByName.root );
+        // printf( "Name Before:\r\n" );
+        // printTreeNode( inst->registersByName.root );
         const RegisterTreeNode* const nameNode = cavlSearch(
             &inst->registersByName.root, (void*)&item->base, &indexByNameAVLPredicate, &avlTrivialRegisterFactory );
         if ( nameNode != &item->base )
         {
-            printf( "Node already exists\r\n" );
+            printf( "Node already exists, updating...\r\n" );
             inst->memory_free( inst, item );
+            RegisterTreeItem* existingItem = (RegisterTreeItem*)(void*)nameNode;
+            existingItem->value = *reg;
         }
+
         assert( inst->registersByName.root != NULL );
         assert( inst->registersByName.size <= inst->registersByName.capacity );
         inst->registersByName.size++;
-        printf( "Name After:\r\n" );
-        printTreeNode( inst->registersByName.root );
+        // printf( "Name After:\r\n" );
+        // printTreeNode( inst->registersByName.root );
 
         // reindex the registers by index
         size_t index = 0;
@@ -210,6 +212,7 @@ bool serializeAndWriteTree( RegisterTreeItem* item, uint32_t* address )
         return true;
     }
 
+    printf( "Serializing item %.*s\r\n", item->value.name.name.count, item->value.name.name.elements );
     size_t size = sizeof( serializeBuffer );
     mattfair_storage_Register_1_0_serialize_( &item->value, serializeBuffer, &size );
     assert( size <= sizeof( serializeBuffer ) );
@@ -230,7 +233,11 @@ bool serializeAndWriteTree( RegisterTreeItem* item, uint32_t* address )
     return serializeAndWriteTree( rightItem, address );
 }
 
-RegisterInstance* RegisterInit( uint32_t start_addr, size_t count, O1HeapInstance* heap, RegisterMemoryAllocate memory_allocate, RegisterMemoryFree memory_free)
+RegisterInstance* RegisterInit( uint32_t start_addr,
+                                size_t count,
+                                O1HeapInstance* heap,
+                                RegisterMemoryAllocate memory_allocate,
+                                RegisterMemoryFree memory_free )
 {
     RegisterInstance* inst = (RegisterInstance*)malloc( sizeof( RegisterInstance ) );
     assert( inst != NULL );
@@ -257,9 +264,9 @@ RegisterInstance* RegisterInit( uint32_t start_addr, size_t count, O1HeapInstanc
 
     flash_init( state->register_start_addr, state->memory_size );
 
-    // RegisterFactoryReset(inst);
+    //RegisterFactoryReset(inst);
     ReadRegisters( inst );
-    printTreeNode( inst->registersByName.root );
+    // printTreeNode( inst->registersByName.root );
 
     return inst;
 }
@@ -290,7 +297,7 @@ void ReadRegisters( RegisterInstance* inst )
         }
         if ( reg.name.name.count == 255 && reg.name.name.elements[0] == 255 )
         {
-            printf( "End of registers\r\n" );
+            // printf( "End of registers\r\n" );
             break;
         }
 
@@ -371,7 +378,7 @@ int8_t DeserializeFlashRegister( void* const out_obj, const uint8_t* buffer, siz
 
 bool RegisterRead( RegisterInstance* inst, const char* name, FlashRegister* regOut )
 {
-    printTreeNode( inst->registersByName.root );
+    // printTreeNode( inst->registersByName.root );
     RegisterTreeItem* item = (RegisterTreeItem*)(void*)cavlSearch(
         &inst->registersByName.root, (void*)name, &searchByNameAVLPredicate, NULL );
 
