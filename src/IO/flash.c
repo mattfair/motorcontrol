@@ -34,7 +34,7 @@ uint32_t flash_get_size( void )
     return flash_state.end_addr - flash_state.start_addr;
 }
 
-FlashStatus flash_erase( void )
+FlashStatus flash_erase_impl( void )
 {
     FLASH_EraseInitTypeDef erase_init_struct;
     erase_init_struct.TypeErase = FLASH_TYPEERASE_SECTORS;
@@ -48,8 +48,21 @@ FlashStatus flash_erase( void )
     {
         return FLASH_ERROR;
     }
+
+    // Verification code
+    uint32_t* sector_ptr = (uint32_t*) flash_state.start_addr;
+    uint32_t size  = (flash_state.end_addr - flash_state.start_addr)/sizeof(uint32_t);
+    for (size_t i = 0; i < size; ++i)
+    {
+        if (sector_ptr[i] != 0xFFFFFFFF)
+        {
+            return FLASH_ERROR;
+        }
+    }
+
     return FLASH_OK;
 }
+FlashStatus (*flash_erase)( void ) = flash_erase_impl;
 
 void flash_clear_flags_impl( void )
 {
@@ -83,22 +96,29 @@ FlashStatus flash_unlock( void )
     }
 }
 
-FlashStatus flash_read( void* data, uint32_t address, size_t size, DeSerializeFunctionPointer deserialize )
+FlashStatus flash_read( void* data, uint32_t address, size_t* size, DeSerializeFunctionPointer deserialize )
 {
     // Ensure the address is within the bounds of the flash memory
-    if ( address < flash_state.start_addr || address + size > flash_state.end_addr )
+    if ( address < flash_state.start_addr || address + *size > flash_state.end_addr )
     {
         return FLASH_ERROR;
     }
 
     if ( deserialize )
     {
-        void* source = (void*)address;
-        deserialize( data, source, &size );
+        uint8_t* source = (void*)address;
+        deserialize( data, source, size);
+
+        printf("read from flash: address: %08x, size: %d, data:", (uint32_t)address, *size);
+        for( size_t i = 0; i < *size; i++ )
+        {
+            printf( "%02x ", source[i] );
+        }
+        printf("\r\n");
     }
     else
     {
-        memcpy( data, (void*)address, size );
+        memcpy( data, (void*)address, *size );
     }
 
     return FLASH_OK;
@@ -112,13 +132,16 @@ FlashStatus flash_write( void* data, uint32_t address, size_t size )
     }
 
     const uint8_t* data_ptr = (const uint8_t*)data;
+    printf("write to flash: address: %08x, size: %d, data:", address, size);
     for ( size_t i = 0; i < size; i++ )
     {
-        //printf( "data_ptr[%d]: %d\n", i, data_ptr[i] );
+        printf( "%02x ", data_ptr[i] );
         if ( HAL_FLASH_Program( FLASH_TYPEPROGRAM_BYTE, address + i, data_ptr[i] ) != HAL_OK )
         {
             return FLASH_ERROR;
         }
     }
+
+    printf("\r\n");
     return FLASH_OK;
 }

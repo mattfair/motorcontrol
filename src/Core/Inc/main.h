@@ -1,22 +1,22 @@
 /* USER CODE BEGIN Header */
 /**
-  ******************************************************************************
-  * @file           : main.h
-  * @brief          : Header for main.c file.
-  *                   This file contains the common defines of the application.
-  ******************************************************************************
-  * @attention
-  *
-  * <h2><center>&copy; Copyright (c) 2020 STMicroelectronics.
-  * All rights reserved.</center></h2>
-  *
-  * This software component is licensed by ST under BSD 3-Clause license,
-  * the "License"; You may not use this file except in compliance with the
-  * License. You may obtain a copy of the License at:
-  *                        opensource.org/licenses/BSD-3-Clause
-  *
-  ******************************************************************************
-  */
+ ******************************************************************************
+ * @file           : main.h
+ * @brief          : Header for main.c file.
+ *                   This file contains the common defines of the application.
+ ******************************************************************************
+ * @attention
+ *
+ * <h2><center>&copy; Copyright (c) 2020 STMicroelectronics.
+ * All rights reserved.</center></h2>
+ *
+ * This software component is licensed by ST under BSD 3-Clause license,
+ * the "License"; You may not use this file except in compliance with the
+ * License. You may obtain a copy of the License at:
+ *                        opensource.org/licenses/BSD-3-Clause
+ *
+ ******************************************************************************
+ */
 /* USER CODE END Header */
 
 /* Define to prevent recursive inclusion -------------------------------------*/
@@ -24,7 +24,8 @@
 #define __MAIN_H
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
 /* Includes ------------------------------------------------------------------*/
@@ -32,26 +33,42 @@ extern "C" {
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include <reg/udral/physics/dynamics/translation/LinearTs_0_1.h>
+#include <reg/udral/physics/electricity/PowerTs_0_1.h>
+#include <reg/udral/service/actuator/common/Feedback_0_1.h>
+#include <reg/udral/service/actuator/common/Status_0_1.h>
+#include <reg/udral/service/actuator/common/_0_1.h>
+#include <reg/udral/service/common/Readiness_0_1.h>
+#include <uavcan/_register/Access_1_0.h>
+#include <uavcan/_register/List_1_0.h>
+#include <uavcan/node/ExecuteCommand_1_1.h>
+#include <uavcan/node/GetInfo_1_0.h>
+#include <uavcan/node/Heartbeat_1_0.h>
+#include <uavcan/node/port/List_0_1.h>
+#include <uavcan/pnp/NodeIDAllocationData_1_0.h>
+#include "canard.h"
 
-/* USER CODE END Includes */
+    /* USER CODE END Includes */
 
-/* Exported types ------------------------------------------------------------*/
-/* USER CODE BEGIN ET */
+    /* Exported types ------------------------------------------------------------*/
+    /* USER CODE BEGIN ET */
+    // forward declare state struct
+    typedef struct State State;
 
-/* USER CODE END ET */
+    /* USER CODE END ET */
 
-/* Exported constants --------------------------------------------------------*/
-/* USER CODE BEGIN EC */
+    /* Exported constants --------------------------------------------------------*/
+    /* USER CODE BEGIN EC */
 
-/* USER CODE END EC */
+    /* USER CODE END EC */
 
-/* Exported macro ------------------------------------------------------------*/
-/* USER CODE BEGIN EM */
+    /* Exported macro ------------------------------------------------------------*/
+    /* USER CODE BEGIN EM */
 
-/* USER CODE END EM */
+    /* USER CODE END EM */
 
-/* Exported functions prototypes ---------------------------------------------*/
-void Error_Handler(void);
+    /* Exported functions prototypes ---------------------------------------------*/
+    void Error_Handler( void );
 
 /* USER CODE BEGIN EFP */
 
@@ -71,9 +88,30 @@ void Error_Handler(void);
 #define SWO_Pin GPIO_PIN_3
 #define SWO_GPIO_Port GPIOB
 
-/* USER CODE BEGIN Private defines */
+    /* USER CODE BEGIN Private defines */
 
-/* USER CODE END Private defines */
+#define KILO 1000L
+#define MEGA ( (int64_t)KILO * KILO )
+
+    CanardMicrosecond GetMonotonicMicroseconds( void );
+    const char* PortToName( const CanardPortID port_id );
+    const char* KindToName( const CanardTransferKind kind );
+    void ProcessMessageServoSetpoint( const reg_udral_physics_dynamics_translation_Linear_0_1* const msg );
+    void ProcessMessageServiceReadiness( const reg_udral_service_common_Readiness_0_1* const msg,
+                                         const CanardMicrosecond monotonic_time );
+    void ProcessMessagePlugAndPlayNodeIDAllocation( const uavcan_pnp_NodeIDAllocationData_1_0* const msg );
+    void ProcessMessagePlugAndPlayNodeIDAllocation( const uavcan_pnp_NodeIDAllocationData_1_0* const msg );
+    uavcan_node_GetInfo_Response_1_0 ProcessRequestNodeGetInfo();
+    uavcan_register_Access_Response_1_0 ProcessRequestRegisterAccess( const uavcan_register_Access_Request_1_0* req );
+    uavcan_node_ExecuteCommand_Response_1_1 ProcessRequestExecuteCommand(
+        const uavcan_node_ExecuteCommand_Request_1_1* req );
+
+    void Send( const CanardMicrosecond tx_deadline_usec,
+               const CanardTransferMetadata* const metadata,
+               const size_t payload_size,
+               const void* const payload );
+
+    /* USER CODE END Private defines */
 
 #ifdef __cplusplus
 }

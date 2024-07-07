@@ -30,9 +30,6 @@ uint32_t flash_get_addr(void);
 // return the size of the flash memory
 uint32_t flash_get_size(void);
 
-// Erases the flash memory sector where registers are stored
-FlashStatus flash_erase(void);
-
 // Locks the flash memory after writing
 FlashStatus flash_lock(void);
 
@@ -48,10 +45,13 @@ typedef int8_t (*DeSerializeFunctionPointer)(
     size_t* const inout_buffer_size_bytes);
 
 // Function to read data from flash memory
-FlashStatus flash_read(void *data, uint32_t address, size_t size, DeSerializeFunctionPointer deserialize);
+FlashStatus flash_read( void* data, uint32_t address, size_t* size, DeSerializeFunctionPointer deserialize );
 
 //function so that we can swap out some hardware specific memory
 extern void (*flash_clear_flags)(void);
+
+// Erases the flash memory sector where registers are stored
+extern FlashStatus (*flash_erase)(void);
 
 #ifdef __cplusplus
 }

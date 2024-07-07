@@ -146,22 +146,24 @@ void test_flash_read_out_of_bounds_start( void )
 {
     uint8_t data[4];
     uint32_t address = flash_get_addr();
-    TEST_ASSERT_EQUAL(FLASH_ERROR, flash_read( &data, address - 1, 4, 0 ));
+    size_t size = 4;
+    TEST_ASSERT_EQUAL(FLASH_ERROR, flash_read( &data, address - 1, &size, 0 ));
 }
 
 void test_flash_read_out_of_bounds_end( void )
 {
     uint8_t data[4];
     uint32_t address = flash_get_addr();
-    size_t size = flash_get_size();
-    TEST_ASSERT_EQUAL(FLASH_ERROR, flash_read( &data, address + size, 4, 0 ));
+    size_t size = 4;
+    TEST_ASSERT_EQUAL(FLASH_ERROR, flash_read( &data, address + size, &size, 0 ));
 }
 
 void test_flash_read_empty( void )
 {
     uint8_t data[4];
     uint32_t address = flash_get_addr();
-    flash_read( &data, address, 4, 0 );
+    size_t size = 4;
+    flash_read( &data, address, &size, 0 );
 
     for ( size_t i = 0; i < 4; i++ )
     {
@@ -184,7 +186,8 @@ void test_flash_read( uint32_t offset)
     //read a chunk of data
     uint8_t data[4];
     uint32_t address = flash_get_addr() + offset;
-    flash_read( &data, address, 4, 0 );
+    size_t size = 4;
+    flash_read( &data, address, &size, 0 );
 
     for ( size_t i = 0; i < 4; i++ )
     {
@@ -193,7 +196,7 @@ void test_flash_read( uint32_t offset)
     }
 
     // read should be successful
-    TEST_ASSERT_EQUAL(FLASH_OK, flash_read(&data, address, 4, 0));
+    TEST_ASSERT_EQUAL(FLASH_OK, flash_read(&data, address, &size, 0));
 }
 
 TEST_CASE( 0 )
