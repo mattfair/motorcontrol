@@ -674,6 +674,7 @@ void test_update_value( void )
     const char* name = "answer_to_everything";
     int answer = 42;
     AddRegisterNatural32Value( name, answer );
+    TEST_ASSERT_EQUAL( 1, RegisterCount( instance ) );
 
     FlashRegister read = { 0 };
     TEST_ASSERT_TRUE( RegisterRead( instance, name, &read ) );
@@ -681,6 +682,7 @@ void test_update_value( void )
 
     int newAnswer = 123456789;
     UpdateRegisterNatural32Value( name, newAnswer );
+    TEST_ASSERT_EQUAL( 1, RegisterCount( instance ) );
 
     FlashRegister newRead = { 0 };
     TEST_ASSERT_TRUE( RegisterRead( instance, name, &newRead ) );

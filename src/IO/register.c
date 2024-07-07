@@ -131,6 +131,10 @@ int32_t registerPush( RegisterInstance* inst, FlashRegister* reg )
         // printTreeNode( inst->registersByName.root );
         const RegisterTreeNode* const nameNode = cavlSearch(
             &inst->registersByName.root, (void*)&item->base, &indexByNameAVLPredicate, &avlTrivialRegisterFactory );
+
+        assert( inst->registersByName.root != NULL );
+        assert( inst->registersByName.size <= inst->registersByName.capacity );
+
         if ( nameNode != &item->base )
         {
             printf( "Node already exists, updating...\r\n" );
@@ -146,10 +150,11 @@ int32_t registerPush( RegisterInstance* inst, FlashRegister* reg )
             }
             existingItem->value = *reg;
         }
+        else
+        {
+            inst->registersByName.size++;
+        }
 
-        assert( inst->registersByName.root != NULL );
-        assert( inst->registersByName.size <= inst->registersByName.capacity );
-        inst->registersByName.size++;
         // printf( "Name After:\r\n" );
         // printTreeNode( inst->registersByName.root );
 
@@ -307,9 +312,11 @@ void ReadRegisters( RegisterInstance* inst )
         return;
     }
 
+    printf( "Reading %d registers from flash memory\r\n", numRegisters );
+
     FlashRegister reg = { 0 };
     uint32_t count = 0;
-    while ( address < endAddress && count++ < numRegisters)
+    while ( address < endAddress && count++ < numRegisters )
     {
         size = RegisterSize( inst );
         memset( &reg, 0, sizeof( FlashRegister ) );

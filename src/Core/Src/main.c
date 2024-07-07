@@ -329,7 +329,6 @@ static CanardPortID GetSubjectID( const SubjectRole role, const char* const port
     // type exposed at this port. It should be immutable, but it is not strictly
     // required so in this implementation we take shortcuts by making it mutable
     // since it's behaviorally simpler in this specific case.
-    /*
     snprintf( register_name, sizeof( register_name ), "uavcan.%s.%s.type", role_name, port_name );
     memset( &reg, 0, sizeof( reg ) );
     if ( !RegisterRead( servo_state.regInstance, register_name, &reg ) )
@@ -347,7 +346,6 @@ static CanardPortID GetSubjectID( const SubjectRole role, const char* const port
             servo_state.flash_register_stale = true;
         }
     }
-    */
 
     return result;
 }
