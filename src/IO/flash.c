@@ -96,10 +96,10 @@ FlashStatus flash_unlock( void )
     }
 }
 
-FlashStatus flash_read( void* data, uint32_t address, size_t size, DeSerializeFunctionPointer deserialize )
+FlashStatus flash_read( void* data, uint32_t address, size_t* size, DeSerializeFunctionPointer deserialize )
 {
     // Ensure the address is within the bounds of the flash memory
-    if ( address < flash_state.start_addr || address + size > flash_state.end_addr )
+    if ( address < flash_state.start_addr || address + *size > flash_state.end_addr )
     {
         return FLASH_ERROR;
     }
@@ -107,11 +107,10 @@ FlashStatus flash_read( void* data, uint32_t address, size_t size, DeSerializeFu
     if ( deserialize )
     {
         uint8_t* source = (void*)address;
-        size_t sourceSize = size;
-        deserialize( data, source, &sourceSize);
+        deserialize( data, source, size);
 
-        printf("read from flash: ");
-        for( size_t i = 0; i < sourceSize; i++ )
+        printf("read from flash: address: %08x, size: %d, data:", (uint32_t)address, *size);
+        for( size_t i = 0; i < *size; i++ )
         {
             printf( "%02x ", source[i] );
         }
@@ -119,7 +118,7 @@ FlashStatus flash_read( void* data, uint32_t address, size_t size, DeSerializeFu
     }
     else
     {
-        memcpy( data, (void*)address, size );
+        memcpy( data, (void*)address, *size );
     }
 
     return FLASH_OK;
@@ -133,7 +132,7 @@ FlashStatus flash_write( void* data, uint32_t address, size_t size )
     }
 
     const uint8_t* data_ptr = (const uint8_t*)data;
-    printf("write to flash: ");
+    printf("write to flash: address: %08x, size: %d, data:", address, size);
     for ( size_t i = 0; i < size; i++ )
     {
         printf( "%02x ", data_ptr[i] );

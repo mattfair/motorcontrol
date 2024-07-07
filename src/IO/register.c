@@ -16,10 +16,7 @@
 #define PASTE3( x, y, z ) PASTE3_IMPL( x, y, z )
 
 #define REGISTER_ERROR_OUT_OF_MEMORY 1
-#define REGISTER_ERROR_FLASH_WRITE 2
-#define REGISTER_ERROR_FLASH_ERASE 3
-#define REGISTER_ERROR_FLASH_UNLOCK 4
-#define REGISTER_ERROR_FLASH_LOCK 5
+#define REGISTER_ERROR_IMMUTABLE 2
 
 // private functions
 void clearTree( RegisterInstance* inst, RegisterTree* tree );
@@ -139,6 +136,14 @@ int32_t registerPush( RegisterInstance* inst, FlashRegister* reg )
             printf( "Node already exists, updating...\r\n" );
             inst->memory_free( inst, item );
             RegisterTreeItem* existingItem = (RegisterTreeItem*)(void*)nameNode;
+
+            if ( existingItem->value.isImmutable )
+            {
+                printf( "Cannot update immutable register %.*s\r\n",
+                        existingItem->value.name.name.count,
+                        existingItem->value.name.name.elements );
+                return -REGISTER_ERROR_IMMUTABLE;
+            }
             existingItem->value = *reg;
         }
 
@@ -264,7 +269,7 @@ RegisterInstance* RegisterInit( uint32_t start_addr,
 
     flash_init( state->register_start_addr, state->memory_size );
 
-    //RegisterFactoryReset(inst);
+    // RegisterFactoryReset(inst);
     ReadRegisters( inst );
     // printTreeNode( inst->registersByName.root );
 
@@ -279,25 +284,39 @@ void RegisterDestroy( RegisterInstance* inst )
     free( inst->registersByIndex );
     free( (RegisterState*)inst->user_reference );
     free( inst );
+    inst = NULL;
 }
 
 void ReadRegisters( RegisterInstance* inst )
 {
-    // Read the registers from flash memory
+    size_t size = 0;
+
     uint32_t address = flash_get_addr();
     uint32_t endAddress = address + flash_get_size();
-    FlashRegister reg = { 0 };
-    size_t size = RegisterSize( inst );
-    while ( address < endAddress )
+
+    uint32_t numRegisters = 0;
+    size = sizeof( uint32_t );
+    flash_read( &numRegisters, address, &size, NULL );
+    address += size;
+
+    // empty flash is all 0xFF
+    assert( size == 4 );
+    if ( numRegisters == 0xFFFFFFFF )
     {
-        if ( flash_read( &reg, address, size, DeserializeFlashRegister ) != FLASH_OK )
+        printf( "No registers found in flash memory\r\n" );
+        return;
+    }
+
+    FlashRegister reg = { 0 };
+    uint32_t count = 0;
+    while ( address < endAddress && count++ < numRegisters)
+    {
+        size = RegisterSize( inst );
+        memset( &reg, 0, sizeof( FlashRegister ) );
+
+        if ( flash_read( &reg, address, &size, DeserializeFlashRegister ) != FLASH_OK )
         {
             printf( "Failed to read register at address %d\r\n", address );
-            break;
-        }
-        if ( reg.name.name.count == 255 && reg.name.name.elements[0] == 255 )
-        {
-            // printf( "End of registers\r\n" );
             break;
         }
 
@@ -358,8 +377,20 @@ bool RegisterFlush( RegisterInstance* inst )
     if ( flash_erase() == FLASH_OK )
     {
         RegisterTreeItem* rootItem = (RegisterTreeItem*)(void*)inst->registersByName.root;
-        uint32_t address = flash_get_addr();
+        uint32_t startAddress = flash_get_addr();
+        uint32_t address = startAddress + sizeof( uint32_t );
+        uint32_t numRegisters = inst->registersByName.size;
+
+        if ( flash_write( &numRegisters, startAddress, sizeof( size_t ) ) != FLASH_OK )
+        {
+            flash_lock();
+            printf( "Failed to write register count to flash memory\r\n" );
+            return false;
+        }
+
         bool success = serializeAndWriteTree( rootItem, &address );
+        printf( "end address: %p\r\n", (void*)address );
+
         flash_lock();
 
         if ( !success )

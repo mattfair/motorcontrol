@@ -8,9 +8,9 @@
 
 #define NUM_REGISTERS 100
 static uint8_t flash_data[mattfair_storage_Register_1_0_SERIALIZATION_BUFFER_SIZE_BYTES_ * NUM_REGISTERS];
-uint32_t address_ptr = (uint32_t)flash_data;
+uint32_t data_used_size = 0;
 
-_Alignas( O1HEAP_ALIGNMENT ) static uint8_t heap_arena[1024 * 50] = { 0 };
+_Alignas( O1HEAP_ALIGNMENT ) static uint8_t heap_arena[1024 * NUM_REGISTERS] = { 0 };
 
 // callback function to make HAL_FLASH_Program write to flash_data
 static HAL_StatusTypeDef CallbackReturn = HAL_OK;
@@ -34,12 +34,30 @@ HAL_StatusTypeDef HAL_FLASH_Program_Callback( uint32_t TypeProgram,
     return CallbackReturn;
 }
 
+void HAL_FLASH_Program_Return( size_t size, HAL_StatusTypeDef status )
+{
+    CallbackReturn = status;
+    for ( size_t i = 0; i < size; i++ )
+    {
+        // all we know is how many times this is going to be called, we don't know the order it will be called
+        // we need to set this up so that the HAL_FLASH_Program_Callback function will write to the flash_data
+        // and then we can read it back to verify the data
+        HAL_FLASH_Program_ExpectAndReturn( FLASH_TYPEPROGRAM_BYTE, 0, 0, status );
+        HAL_FLASH_Program_IgnoreArg_Address();
+        HAL_FLASH_Program_IgnoreArg_Data();
+    }
+}
+
 void ( *flash_clear_flags_hw )( void );
 void mock_clear_flags( void ) {}
 
 FlashStatus ( *flash_erase_hw )( void );
 FlashStatus mock_flash_erase( void )
 {
+    for ( size_t i = 0; i < sizeof( flash_data ); i++ )
+    {
+        flash_data[i] = 0xFF;
+    }
     return FLASH_OK;
 }
 
@@ -56,6 +74,19 @@ static void RegisterFree( RegisterInstance* const ins, void* const pointer )
 {
     printf( "Freeing item: %p\r\n", (void*)pointer );
     o1heapFree( ins->heap, pointer );
+}
+
+void TEST_CONTAINS_STRING( char* strings[], size_t count, const char* str, size_t len )
+{
+    for ( size_t i = 0; i < count; i++ )
+    {
+        if ( strncmp( strings[i], str, len ) == 0 )
+        {
+            TEST_PASS();
+            return;
+        }
+    }
+    TEST_FAIL_MESSAGE( "String not found in array" );
 }
 
 /*
@@ -81,16 +112,15 @@ static void dump_flash_data_to_file( void )
 void setUp( void )
 {
     // Clear the flash data
-    for ( size_t i = 0; i < sizeof( flash_data ); i++ )
-    {
-        flash_data[i] = 0xFF;
-    }
+    mock_flash_erase();
     CallbackReturn = HAL_OK;
 
     heap = o1heapInit( heap_arena, sizeof( heap_arena ) );
 
     HAL_FLASH_Program_AddCallback( HAL_FLASH_Program_Callback );
-    address_ptr = (uint32_t)flash_data;
+
+    // first 4 bytes is the number of registers used
+    data_used_size = sizeof( uint32_t );
 
     flash_clear_flags_hw = flash_clear_flags;
     flash_clear_flags = mock_clear_flags;
@@ -108,20 +138,6 @@ void tearDown( void )
     flash_erase = flash_erase_hw;
 }
 
-void WriteFlashBytesExpectAndReturn( void* data, size_t size, HAL_StatusTypeDef status )
-{
-    (void)data;
-    // const uint8_t* buffer = (const uint8_t*)data;
-    for ( size_t i = 0; i < size; i++ )
-    {
-        HAL_FLASH_Program_IgnoreAndReturn( status );
-        // printf( "expect data_ptr[%d]: %d\n", i, buffer[i] );
-        // HAL_FLASH_Program_ExpectAndReturn( FLASH_TYPEPROGRAM_BYTE, address_ptr + i, buffer[i], status );
-    }
-
-    address_ptr += size;
-}
-
 void SetName( uavcan_register_Name_1_0* name, const char* str )
 {
     name->name.count = strlen( str );
@@ -129,7 +145,7 @@ void SetName( uavcan_register_Name_1_0* name, const char* str )
     memcpy( name->name.elements, str, name->name.count );
 }
 
-void add_natural_32( const char* name, uint32_t value, bool isImmutable )
+void add_natural_32( const char* name, uint32_t value, bool isImmutable, bool exists )
 {
     FlashRegister reg = { 0 };
     SetName( &reg.name, name );
@@ -143,27 +159,50 @@ void add_natural_32( const char* name, uint32_t value, bool isImmutable )
     memset( buffer, 0, bufferSize );
     mattfair_storage_Register_1_0_serialize_( &reg, buffer, &bufferSize );
 
+    if ( !exists )
+    {
+        data_used_size += bufferSize;
+    }
+
     HAL_FLASH_Unlock_ExpectAndReturn( HAL_OK );
-    WriteFlashBytesExpectAndReturn( buffer, bufferSize, HAL_OK );
+    HAL_FLASH_Program_Return( data_used_size, HAL_OK );
     HAL_FLASH_Lock_ExpectAndReturn( HAL_OK );
 
+    FlashRegister read = { 0 };
+
+    // verify the register exists or not already
+    TEST_ASSERT_EQUAL( exists, RegisterRead( instance, name, &read ) );
+
+    // add the register
     TEST_ASSERT_TRUE_MESSAGE( RegisterAdd( instance, name, &reg.value, isImmutable ),
                               "Failed to write natural32 register" );
+
+    // verify the register added
+    TEST_ASSERT_TRUE( RegisterRead( instance, name, &read ) );
+    TEST_ASSERT_TRUE( uavcan_register_Value_1_0_is_natural32_( &read.value ) );
+    TEST_ASSERT_EQUAL( 1, read.value.natural32.value.count );
+    TEST_ASSERT_EQUAL( value, read.value.natural32.value.elements[0] );
+
     TEST_ASSERT_TRUE( RegisterFlush( instance ) );
     // dump_flash_data_to_file();
 }
 
 void AddRegisterNatural32Value( const char* name, uint32_t value )
 {
-    add_natural_32( name, value, false );
+    add_natural_32( name, value, false, false );
+}
+
+void UpdateRegisterNatural32Value( const char* name, uint32_t value )
+{
+    add_natural_32( name, value, false, true );
 }
 
 void AddImmutableRegisterNatural32Value( const char* name, uint32_t value )
 {
-    add_natural_32( name, value, true );
+    add_natural_32( name, value, true, false );
 }
 
-void AddRegisterReal64Value( const char* name, double value )
+void add_real_64( const char* name, double value, bool exists )
 {
     FlashRegister reg = { 0 };
     SetName( &reg.name, name );
@@ -177,16 +216,38 @@ void AddRegisterReal64Value( const char* name, double value )
     memset( buffer, 0, bufferSize );
     mattfair_storage_Register_1_0_serialize_( &reg, buffer, &bufferSize );
 
+    if ( !exists )
+    {
+        data_used_size += bufferSize;
+    }
+
     HAL_FLASH_Unlock_ExpectAndReturn( HAL_OK );
-    WriteFlashBytesExpectAndReturn( buffer, bufferSize, HAL_OK );
+    HAL_FLASH_Program_Return( data_used_size, HAL_OK );
     HAL_FLASH_Lock_ExpectAndReturn( HAL_OK );
 
+    FlashRegister read = { 0 };
+
+    // verify the register exists or not already
+    TEST_ASSERT_EQUAL( exists, RegisterRead( instance, name, &read ) );
+
+    // add the register
     TEST_ASSERT_TRUE_MESSAGE( RegisterAdd( instance, name, &reg.value, false ), "Failed to write real64 register" );
+
+    // verify the register added
+    TEST_ASSERT_TRUE( RegisterRead( instance, name, &read ) );
+    TEST_ASSERT_TRUE( uavcan_register_Value_1_0_is_real64_( &read.value ) );
+    TEST_ASSERT_EQUAL( 1, read.value.real64.value.count );
+    TEST_ASSERT_EQUAL( value, read.value.real64.value.elements[0] );
+
     TEST_ASSERT_TRUE( RegisterFlush( instance ) );
     // dump_flash_data_to_file();
 }
+void AddRegisterReal64Value( const char* name, double value )
+{
+    add_real_64( name, value, false );
+}
 
-void AddRegisterStringValue( const char* name, const char* value )
+void add_string( const char* name, const char* value, bool exists )
 {
     FlashRegister reg = { 0 };
     SetName( &reg.name, name );
@@ -200,13 +261,36 @@ void AddRegisterStringValue( const char* name, const char* value )
     memset( buffer, 0, bufferSize );
     mattfair_storage_Register_1_0_serialize_( &reg, buffer, &bufferSize );
 
+    if ( !exists )
+    {
+        data_used_size += bufferSize;
+    }
+
     HAL_FLASH_Unlock_ExpectAndReturn( HAL_OK );
-    WriteFlashBytesExpectAndReturn( buffer, bufferSize, HAL_OK );
+    HAL_FLASH_Program_Return( data_used_size, HAL_OK );
     HAL_FLASH_Lock_ExpectAndReturn( HAL_OK );
 
+    FlashRegister read = { 0 };
+
+    // verify the register exists or not already
+    TEST_ASSERT_EQUAL( exists, RegisterRead( instance, name, &read ) );
+
+    // add the register
     TEST_ASSERT_TRUE_MESSAGE( RegisterAdd( instance, name, &reg.value, false ), "Failed to write string register" );
+
+    // verify the register added
+    TEST_ASSERT_TRUE( RegisterRead( instance, name, &read ) );
+    TEST_ASSERT_TRUE( uavcan_register_Value_1_0_is_string_( &read.value ) );
+    TEST_ASSERT_EQUAL( strlen( value ), read.value._string.value.count );
+    TEST_ASSERT_EQUAL_STRING( value, read.value._string.value.elements );
+
     TEST_ASSERT_TRUE( RegisterFlush( instance ) );
     // dump_flash_data_to_file();
+}
+
+void AddRegisterStringValue( const char* name, const char* value )
+{
+    add_string( name, value, false );
 }
 
 void test_init( void )
@@ -237,12 +321,12 @@ void test_write_fail( void )
     mattfair_storage_Register_1_0_serialize_( &reg, buffer, &bufferSize );
 
     HAL_FLASH_Unlock_ExpectAndReturn( HAL_OK );
-    WriteFlashBytesExpectAndReturn( buffer, 1, HAL_ERROR );
+    HAL_FLASH_Program_Return( 1, HAL_ERROR );
     HAL_FLASH_Lock_ExpectAndReturn( HAL_OK );
 
-    CallbackReturn = HAL_ERROR;
     uavcan_register_Value_1_0 value = { 0 };
-    TEST_ASSERT_FALSE( RegisterAdd( instance, "test", &value, false ) );
+    TEST_ASSERT_TRUE( RegisterAdd( instance, "test", &value, false ) );
+    TEST_ASSERT_FALSE( RegisterFlush( instance ) );
 }
 
 void test_write_lock_fail( void )
@@ -259,27 +343,13 @@ void test_write_lock_fail( void )
 
     HAL_FLASH_Unlock_ExpectAndReturn( HAL_ERROR );
     uavcan_register_Value_1_0 value = { 0 };
-    TEST_ASSERT_FALSE( RegisterAdd( instance, "test", &value, false ) );
+    TEST_ASSERT_TRUE( RegisterAdd( instance, "test", &value, false ) );
+    TEST_ASSERT_FALSE( RegisterFlush( instance ) );
 }
 
 void test_single_write_increments_count( void )
 {
-    FlashRegister reg = { 0 };
-    reg.isImmutable = false;
-    reg.name.name.count = 4;
-    memcpy( reg.name.name.elements, "test", 4 );
-
-    size_t bufferSize = mattfair_storage_Register_1_0_SERIALIZATION_BUFFER_SIZE_BYTES_;
-    uint8_t buffer[bufferSize];
-    memset( buffer, 0, bufferSize );
-    mattfair_storage_Register_1_0_serialize_( &reg, buffer, &bufferSize );
-
-    HAL_FLASH_Unlock_ExpectAndReturn( HAL_OK );
-    WriteFlashBytesExpectAndReturn( buffer, bufferSize, HAL_OK );
-    HAL_FLASH_Lock_ExpectAndReturn( HAL_OK );
-
-    uavcan_register_Value_1_0 value = { 0 };
-    TEST_ASSERT_TRUE( RegisterAdd( instance, "test", &value, false ) );
+    AddRegisterNatural32Value( "test", 42 );
     TEST_ASSERT_EQUAL( 1, RegisterCount( instance ) );
 }
 
@@ -314,18 +384,9 @@ void test_multiple_write_lookup_name_by_index( void )
     for ( size_t i = 0; i < 4; i++ )
     {
         uavcan_register_Name_1_0 name = RegisterNameByIndex( instance, i );
-        TEST_ASSERT_EQUAL( 3, name.name.count );
 
-        bool found = false;
-        for ( size_t j = 0; i < 4; i++ )
-        {
-            if ( strncmp( names[j], (const char*)name.name.elements, name.name.count ) == 0 )
-            {
-                found = true;
-                break;
-            }
-        }
-        TEST_ASSERT_TRUE( found );
+        // name is not guaranteed to be in the same order as added
+        TEST_CONTAINS_STRING( names, 4, (const char*)name.name.elements, name.name.count );
     }
 }
 
@@ -565,7 +626,7 @@ void test_factory_reset_failure( void )
 
     TEST_ASSERT_EQUAL( 1, RegisterCount( instance ) );
 
-    HAL_FLASH_Unlock_ExpectAndReturn( HAL_OK );
+    HAL_FLASH_Unlock_ExpectAndReturn( HAL_ERROR );
 
     RegisterFactoryReset( instance );
 
@@ -604,6 +665,7 @@ void test_load_on_startup( void )
     // reinitialize
     uintptr_t address = (uintptr_t)flash_data;
     RegisterInstance* newInit = RegisterInit( address, NUM_REGISTERS, heap, RegisterAllocate, RegisterFree );
+    TEST_ASSERT_EQUAL( address, RegisterStartAddress( newInit ) );
     TEST_ASSERT_EQUAL( 5, RegisterCount( newInit ) );
 }
 
@@ -618,7 +680,7 @@ void test_update_value( void )
     TEST_ASSERT_EQUAL( answer, read.value.natural32.value.elements[0] );
 
     int newAnswer = 123456789;
-    AddRegisterNatural32Value( name, newAnswer );
+    UpdateRegisterNatural32Value( name, newAnswer );
 
     FlashRegister newRead = { 0 };
     TEST_ASSERT_TRUE( RegisterRead( instance, name, &newRead ) );

@@ -45,7 +45,7 @@ typedef int8_t (*DeSerializeFunctionPointer)(
     size_t* const inout_buffer_size_bytes);
 
 // Function to read data from flash memory
-FlashStatus flash_read(void *data, uint32_t address, size_t size, DeSerializeFunctionPointer deserialize);
+FlashStatus flash_read( void* data, uint32_t address, size_t* size, DeSerializeFunctionPointer deserialize );
 
 //function so that we can swap out some hardware specific memory
 extern void (*flash_clear_flags)(void);
