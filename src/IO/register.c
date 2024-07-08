@@ -119,7 +119,7 @@ int32_t registerPush( RegisterInstance* inst, FlashRegister* reg )
 {
     int32_t out = 0;
 
-    printf( "pushing size %d, capacity %d\r\n", inst->registersByName.size, inst->registersByName.capacity );
+    //printf( "pushing size %d, capacity %d\r\n", inst->registersByName.size, inst->registersByName.capacity );
     RegisterTreeItem* const item =
         inst->registersByName.size < inst->registersByName.capacity ? registerAllocateQueueItem( inst, reg ) : NULL;
 
@@ -164,7 +164,7 @@ int32_t registerPush( RegisterInstance* inst, FlashRegister* reg )
         RegisterTreeItem* rootItem = (RegisterTreeItem*)(void*)inst->registersByName.root;
         updateIndexToNodeMap( inst, rootItem, &index );
 
-        printf( "Pushed item: %p\r\n", (void*)item );
+        //printf( "Pushed item: %p\r\n", (void*)item );
         out = 1;
     }
     else
@@ -222,7 +222,7 @@ bool serializeAndWriteTree( RegisterTreeItem* item, uint32_t* address )
         return true;
     }
 
-    printf( "Serializing item %.*s\r\n", item->value.name.name.count, item->value.name.name.elements );
+    //printf( "Serializing item %.*s\r\n", item->value.name.name.count, item->value.name.name.elements );
     size_t size = sizeof( serializeBuffer );
     mattfair_storage_Register_1_0_serialize_( &item->value, serializeBuffer, &size );
     assert( size <= sizeof( serializeBuffer ) );
@@ -396,7 +396,7 @@ bool RegisterFlush( RegisterInstance* inst )
         }
 
         bool success = serializeAndWriteTree( rootItem, &address );
-        printf( "end address: %p\r\n", (void*)address );
+        //printf( "end address: %p\r\n", (void*)address );
 
         flash_lock();
 
@@ -433,7 +433,7 @@ const RegisterTreeItem* getItemByIndex( RegisterInstance* inst, uint32_t index )
 {
     if ( index >= inst->registersByName.size )
     {
-        printf( "Could not find register at index %d\r\n", index );
+        //printf( "Could not find register at index %d\r\n", index );
         return NULL;
     }
 
@@ -449,7 +449,7 @@ bool RegisterReadByIndex( RegisterInstance* inst, uint32_t index, FlashRegister*
         return false;
     }
 
-    printf( "Found register %.*s at index %d\r\n", item->value.name.name.count, item->value.name.name.elements, index );
+    //printf( "Found register %.*s at index %d\r\n", item->value.name.name.count, item->value.name.name.elements, index );
 
     *regOut = item->value;
     return true;

@@ -40,6 +40,7 @@
 #include <IO/canringbuffer.h>
 #include <IO/register.h>
 #include <assert.h>
+#include <bxcan.h>
 #include <inttypes.h>
 #include <o1heap.h>
 #include <reg/udral/physics/dynamics/translation/LinearTs_0_1.h>
@@ -51,6 +52,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 #include <uavcan/_register/Access_1_0.h>
 #include <uavcan/_register/List_1_0.h>
 #include <uavcan/node/ExecuteCommand_1_1.h>
@@ -79,11 +81,10 @@ const uint32_t FLASH_USER_END_ADDR = FLASH_USER_START_ADDR + FLASH_SECTOR_SIZE -
 
 /// For CAN FD the queue can be smaller.
 #define CAN_TX_QUEUE_CAPACITY 100
+#define CAN_BIT_RATE 1000000ul
 
 // Polynomial for CRC-64-WE this is used for the unique-ID hash.
 #define CRC64_POLY 0x42F0E1EBA9EA3693ULL
-
-#define MAX_RETRY_LIMIT 5
 
 typedef enum SubjectRole
 {
@@ -148,9 +149,6 @@ uint8_t Serial2RxBuffer[1];
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config( void );
 /* USER CODE BEGIN PFP */
-
-HAL_StatusTypeDef hal_can_transmit( CAN_HandleTypeDef* hcan, const CanardFrame* frame );
-HAL_StatusTypeDef hal_can_receive( CAN_HandleTypeDef* hcan, CanardFrame* frame );
 
 static uint8_t serializeBuffer[512];
 
@@ -315,7 +313,7 @@ static CanardPortID GetSubjectID( const SubjectRole role, const char* const port
         reg.value.natural16.value.elements[0] = UINT16_MAX;  // This means "undefined", per Specification, which is the
 
         // If the register does not exist, create it with the default value.
-        if ( RegisterAdd( servo_state.regInstance, &register_name[0], &reg.value, true ) )
+        if ( RegisterAdd( servo_state.regInstance, &register_name[0], &reg.value, false ) )
         {
             servo_state.flash_register_stale = true;
         }
@@ -378,19 +376,19 @@ void Send( const CanardMicrosecond tx_deadline_usec,
         {
             // An error has occurred: report it and handle appropriately.
             // The error value is negative, so we need to negate it to get the correct error code.
-            printf( "Transmit error: %lu\r\n", -result );
+            printf( "Transmit error: %d\r\n", -result );
         }
         else
         {
             // The transmission request has been enqueued. Nothing else to do.
             // printf( "sent successfully\r\n" );
+            /*
             printf( "port_id=%s, transfer_id=%d, priority=%d, kind=%s, remote_node_id=%d\r\n",
                     PortToName( metadata->port_id ),
                     metadata->transfer_id,
                     metadata->priority,
                     KindToName( metadata->transfer_kind ),
                     metadata->remote_node_id );
-            /*
             printf( "payload: " );
             for ( size_t i = 0; i < payload_size; ++i )
             {
@@ -406,18 +404,14 @@ void Send( const CanardMicrosecond tx_deadline_usec,
 /// Invoked at the rate of the fastest loop.
 static void HandleFastLoop( const CanardMicrosecond monotonic_time )
 {
-    // Apply control inputs if armed.
-    /*
-    if (state->servo.arming.armed)
+    if ( servo_state.servo.arming.armed )
     {
-      fprintf(stderr, "\rp=%.3f m    v=%.3f m/s    a=%.3f (m/s)^2    F=%.3f N    \r", (double)state->servo.position,
-    (double)state->servo.velocity, (double)state->servo.acceleration, (double)state->servo.force);
+        printf( "p=%.3f m    v=%.3f m/s    a=%.3f (m/s)^2    F=%.3f N    \r\n",
+                (double)servo_state.servo.position,
+                (double)servo_state.servo.velocity,
+                (double)servo_state.servo.acceleration,
+                (double)servo_state.servo.force );
     }
-    else
-    {
-      fprintf(stderr, "\rDISARMED    \r");
-    }
-    */
 
     const bool anonymous = servo_state.canard.node_id > CANARD_NODE_ID_MAX;
     const uint64_t servo_transfer_id = servo_state.next_transfer_id.servo_fast_loop++;
@@ -719,9 +713,9 @@ static void HandleOneTenthHzLoop( const CanardMicrosecond monotonic_time )
         FillServers( servo_state.canard.rx_subscriptions[CanardTransferKindResponse], &m.clients );  // For regularity.
 
         // Serialize and publish the message. Use a small buffer because we know that our message is always small.
-        uint8_t serialized[512] = { 0 };  // https://github.com/OpenCyphal/nunavut/issues/191
+        // uint8_t serialized[512] = { 0 };  // https://github.com/OpenCyphal/nunavut/issues/191
         size_t serialized_size = uavcan_node_port_List_0_1_SERIALIZATION_BUFFER_SIZE_BYTES_;
-        if ( uavcan_node_port_List_0_1_serialize_( &m, &serialized[0], &serialized_size ) >= 0 )
+        if ( uavcan_node_port_List_0_1_serialize_( &m, serializeBuffer, &serialized_size ) >= 0 )
         {
             const CanardTransferMetadata transfer = {
                 .priority = CanardPriorityOptional,  // Mind the priority.
@@ -730,7 +724,7 @@ static void HandleOneTenthHzLoop( const CanardMicrosecond monotonic_time )
                 .remote_node_id = CANARD_NODE_ID_UNSET,
                 .transfer_id = (CanardTransferID)( servo_state.next_transfer_id.uavcan_node_port_list++ ),
             };
-            Send( monotonic_time + MEGA, &transfer, serialized_size, &serialized[0] );
+            Send( monotonic_time + MEGA, &transfer, serialized_size, &serializeBuffer );
         }
     }
 }
@@ -874,7 +868,7 @@ uavcan_node_ExecuteCommand_Response_1_1 ProcessRequestExecuteCommand(
 ///
 uavcan_register_Access_Response_1_0 ProcessRequestRegisterAccess( const uavcan_register_Access_Request_1_0* req )
 {
-    printf( "Processing register access request...\r\n" );
+    // printf( "Processing register access request...\r\n" );
     char* name = malloc( req->name.name.count + 1 );
     memcpy( name, req->name.name.elements, req->name.name.count );
     name[req->name.name.count] = '\0';
@@ -896,8 +890,8 @@ uavcan_register_Access_Response_1_0 ProcessRequestRegisterAccess( const uavcan_r
 
         if ( !immutable )
         {
-            printf( "Writing register %s \r\n", name );
-            PrintValue( &req->value );
+            // printf( "Writing register %s \r\n", name );
+            // PrintValue( &req->value );
             if ( RegisterAdd( servo_state.regInstance, name, &req->value, immutable ) )
             {
                 servo_state.flash_register_stale = true;
@@ -918,8 +912,8 @@ uavcan_register_Access_Response_1_0 ProcessRequestRegisterAccess( const uavcan_r
     if ( RegisterRead( servo_state.regInstance, name, &reg ) )
     {
         resp.value = reg.value;
-        printf( "Read register %s \r\n", name );
-        PrintValue( &resp.value );
+        // printf( "Read register %s \r\n", name );
+        // PrintValue( &resp.value );
 
         // Currently, all registers we implement are mutable and persistent. This is an acceptable simplification,
         // but more advanced implementations will need to differentiate between them to support advanced features like
@@ -928,7 +922,7 @@ uavcan_register_Access_Response_1_0 ProcessRequestRegisterAccess( const uavcan_r
     }
     else
     {
-        printf( "Failed to read register %s \r\n", name );
+        // printf( "Failed to read register %s \r\n", name );
         uavcan_register_Value_1_0_select_empty_( &resp.value );
         resp._mutable = true;
     }
@@ -998,36 +992,6 @@ static void RegisterFree( RegisterInstance* const ins, void* const pointer )
     o1heapFree( ins->heap, pointer );
 }
 
-/**
- * Attempt to transmit a CAN frame with exponential backoff retry logic.
- */
-HAL_StatusTypeDef attempt_transmit( CAN_HandleTypeDef* hcan, const CanardFrame* frame )
-{
-    uint32_t retryDelay = 10;
-    int retryCount = 0;
-
-    while ( retryCount < MAX_RETRY_LIMIT )
-    {
-        if ( HAL_CAN_GetTxMailboxesFreeLevel( hcan ) > 0 )
-        {  // Ensure there is at least one free mailbox
-            HAL_StatusTypeDef status = hal_can_transmit( hcan, frame );
-            if ( status == HAL_OK )
-            {
-                return HAL_OK;  // Frame was successfully transmitted
-            }
-            else
-            {
-                CanErrorCallback( hcan );
-            }
-        }
-
-        HAL_Delay( retryDelay );
-        retryDelay *= 2;  // Exponentially increase the delay
-        retryCount++;
-    }
-    return HAL_ERROR;  // Transmission failed after retries
-}
-
 static void PrintCanardFrame( const CanardFrame* frame )
 {
     if ( frame == NULL )
@@ -1081,12 +1045,14 @@ static void SendResponse( const CanardRxTransfer* const original_request_transfe
 
 static void ProcessReceivedTransfer( const CanardRxTransfer* const transfer )
 {
+    /*
     printf( "Received transfer: %d bytes from %d, port-ID %d, transfer-ID %d, kind %s\r\n",
             (int)transfer->payload_size,
             (int)transfer->metadata.remote_node_id,
             (int)transfer->metadata.port_id,
             (int)transfer->metadata.transfer_id,
             KindToName( transfer->metadata.transfer_kind ) );
+    */
     if ( transfer->metadata.transfer_kind == CanardTransferKindMessage )
     {
         size_t size = transfer->payload_size;
@@ -1128,11 +1094,11 @@ static void ProcessReceivedTransfer( const CanardRxTransfer* const transfer )
             // The request object is empty so we don't bother deserializing it. Just send the response.
             const uavcan_node_GetInfo_Response_1_0 resp = ProcessRequestNodeGetInfo();
             size_t responseSize = sizeof( serializeBuffer );
-            printf( "Serializing GetInfo response...\r\n" );
+            // printf( "Serializing GetInfo response...\r\n" );
             const int8_t res = uavcan_node_GetInfo_Response_1_0_serialize_( &resp, serializeBuffer, &responseSize );
             if ( res >= 0 )
             {
-                printf( "Sending GetInfo response...\r\n" );
+                // printf( "Sending GetInfo response...\r\n" );
                 SendResponse( transfer, responseSize, serializeBuffer );
             }
             else
@@ -1143,10 +1109,10 @@ static void ProcessReceivedTransfer( const CanardRxTransfer* const transfer )
         }
         else if ( transfer->metadata.port_id == uavcan_register_Access_1_0_FIXED_PORT_ID_ )
         {
-            printf( "Received register access request\r\n" );
+            // printf( "Received register access request\r\n" );
             uavcan_register_Access_Request_1_0 req = { 0 };
             size_t size = transfer->payload_size;
-            PrintTransferPayload( transfer );
+            // PrintTransferPayload( transfer );
 
             if ( uavcan_register_Access_Request_1_0_deserialize_( &req, transfer->payload, &size ) >= 0 )
             {
@@ -1197,7 +1163,7 @@ static void ProcessReceivedTransfer( const CanardRxTransfer* const transfer )
         }
         else if ( transfer->metadata.port_id == uavcan_register_List_1_0_FIXED_PORT_ID_ )
         {
-            printf( "Received register list request\r\n" );
+            // printf( "Received register list request\r\n" );
             uavcan_register_List_Request_1_0 req = { 0 };
             size_t size = transfer->payload_size;
             if ( uavcan_register_List_Request_1_0_deserialize_( &req, transfer->payload, &size ) >= 0 )
@@ -1210,14 +1176,14 @@ static void ProcessReceivedTransfer( const CanardRxTransfer* const transfer )
                     size_t responseSize = sizeof( serializeBuffer );
                     if ( uavcan_register_List_Response_1_0_serialize_( &resp, serializeBuffer, &responseSize ) >= 0 )
                     {
-                        printf( "Sending register list response...\r\n" );
+                        // printf( "Sending register list response...\r\n" );
                         SendResponse( transfer, responseSize, serializeBuffer );
-                        printf( "Sent register list response\r\n" );
+                        // printf( "Sent register list response\r\n" );
                     }
                 }
                 else
                 {
-                    printf( "Failed to read register by index %u\r\n", req.index );
+                    // printf( "Failed to read register by index %u\r\n", req.index );
                     SendResponse( transfer, 0, serializeBuffer );
                 }
             }
@@ -1260,45 +1226,22 @@ static CanardFrame MakeCanardFrame( const CAN_RxHeaderTypeDef* const header, con
 
 void ProcessCanMessages( uint8_t ifidx )
 {
-    CAN_Message msg;
-    while ( !CanRingBuffer_IsEmpty( &servo_state.can_rx_buffer[ifidx] ) )
+    uint32_t out_extended_can_id = servo_state.canard.node_id;
+    size_t out_payload_size = CANARD_MTU_CAN_CLASSIC;
+    uint8_t out_payload[CANARD_MTU_CAN_CLASSIC] = { 0 };
+
+    while ( bxCANPop( ifidx, &out_extended_can_id, &out_payload_size, &out_payload ) )
     {
-        if ( !CanRingBuffer_Dequeue( &servo_state.can_rx_buffer[ifidx], &msg ) )
-        {
-            printf( "Failed to dequeue CAN message\r\n" );
-            return;
-        }
-        // Process received frames by feeding them from CAN to libcanard.
-        // The order in which we handle the redundant interfaces doesn't matter -- libcanard can accept incoming
-        // frames from any of the redundant interface in an arbitrary order.
-        // The internal state machine will sort them out and remove duplicates automatically.
-        CanardFrame frame = MakeCanardFrame( &msg.header, msg.payload );
-        // PrintCanardFrame( &frame );
-        //  printf( "Successfully received CAN message: %d\r\n", receive_result );
-        //   The AN adapter uses the wall clock for timestamping, but we need monotonic.
-        //   Wall clock can only be used for time synchronization.
+        CanardFrame frame = { 0 };
+        frame.extended_can_id = out_extended_can_id;
+        frame.payload_size = out_payload_size;
+        frame.payload = out_payload;
+
         const CanardMicrosecond timestamp_usec = GetMonotonicMicroseconds();
         CanardRxTransfer transfer = { 0 };
         CanardRxSubscription* sub = NULL;
         const int8_t canard_result =
             canardRxAccept( &servo_state.canard, timestamp_usec, &frame, ifidx, &transfer, &sub );
-
-        /*
-        printf( "Transfer received: %d bytes, port_id=%s, transfer_id=%d, priority=%d, kind=%s, remote_node_id=%d, "
-                "canardRxAccept result=%d\r\n",
-                transfer.payload_size,
-                PortToName( transfer.metadata.port_id ),
-                transfer.metadata.transfer_id,
-                transfer.metadata.priority,
-                KindToName( transfer.metadata.transfer_kind ),
-                transfer.metadata.remote_node_id,
-                canard_result );
-        */
-
-        if ( sub != NULL )
-        {
-            printf( "Matching subscription found for port ID: %u\r\n", sub->port_id );
-        }
 
         if ( canard_result > 0 )
         {
@@ -1607,6 +1550,21 @@ int main( void )
                                      : (CanardNodeID)reg.value.natural16.value.elements[0];
     printf( "CAN ID: %d\r\n", servo_state.canard.node_id );
 
+    // Dynamic BIT RATE Change CAN Speed to CAN_BIT_RATE (register default/defined)
+    BxCANTimings timings;
+    if ( !bxCANComputeTimings( HAL_RCC_GetPCLK1Freq(), CAN_BIT_RATE, &timings ) )
+    {
+        printf( "Error computing CAN timings\r\n" );
+        assert( false );
+    }
+
+    // Configurea bxCAN speed && mode
+    if ( !bxCANConfigure( 0, timings, false ) )
+    {
+        printf( "Error initialization bxCANConfigure\r\n" );
+        assert( false );
+    }
+
     /* CAN setup */
     CAN_FilterTypeDef sFilterConfig = { 0 };
     sFilterConfig.FilterBank = 0;                       // Specify the filter bank
@@ -1626,10 +1584,12 @@ int main( void )
     }
 
     // Enable CAN RX interrupt
+    /*
     if ( HAL_CAN_ActivateNotification( &CAN_H, CAN_IT_RX_FIFO0_MSG_PENDING | CAN_IT_ERROR ) != HAL_OK )
     {
         Error_Handler();
     }
+    */
 
     // start CAN
     if ( HAL_CAN_Start( &CAN_H ) != HAL_OK )
@@ -1863,7 +1823,7 @@ int main( void )
 
     // Now the node is initialized and we're ready to roll.
     servo_state.started_at = GetMonotonicMicroseconds();
-    const CanardMicrosecond fast_loop_period = MEGA / 50;
+    const CanardMicrosecond fast_loop_period = MEGA / 5;
     CanardMicrosecond next_fast_iter_at = servo_state.started_at + fast_loop_period;
     CanardMicrosecond next_one_hz_iter_at = servo_state.started_at + MEGA;
     CanardMicrosecond next_one_tenth_hz_iter_at = servo_state.started_at + MEGA * 10;
@@ -1894,20 +1854,19 @@ int main( void )
         if ( monotonic_time >= next_fast_iter_at )
         {
             next_fast_iter_at += fast_loop_period;
-            // printf("Next fast loop: %ld \r\n", (long)next_fast_iter_at);
+
             HandleFastLoop( monotonic_time );
         }
         if ( monotonic_time >= next_one_hz_iter_at )
         {
             next_one_hz_iter_at += MEGA;
-            // printf("Next one Hz loop: %ld \r\n", (long)next_one_hz_iter_at);
+
             HandleOneHzLoop( monotonic_time );
         }
         if ( monotonic_time >= next_one_tenth_hz_iter_at )
         {
             next_one_tenth_hz_iter_at += MEGA * 10;
             HandleOneTenthHzLoop( monotonic_time );
-            // printf("Next onetenth Hz loop: %ld \r\n", (long)next_one_tenth_hz_iter_at);
         }
 
         // Manage CAN RX/TX per redundant interface.
@@ -1919,26 +1878,19 @@ int main( void )
             while ( tqi != NULL )
             {
                 CanardMicrosecond current_time = GetMonotonicMicroseconds();
-                if ( ( tqi->tx_deadline_usec == 0 ) || ( tqi->tx_deadline_usec > current_time ) )
+                if ( bxCANPush( ifidx,
+                                current_time,
+                                tqi->tx_deadline_usec,
+                                tqi->frame.extended_can_id,
+                                tqi->frame.payload_size,
+                                tqi->frame.payload ) )
                 {
-                    if ( attempt_transmit( &servo_state.canbus[ifidx], &tqi->frame ) == HAL_OK )
-                    {
-                        // printf( "Successfully transmitted frame\r\n" );
-                    }
-                    else
-                    {
-                        printf( "Transmit failed after retries\r\n" );
-                        CanErrorCallback( &servo_state.canbus[ifidx] );
-                    }
+                    // The frame was transmitted or timed out, remove it from the queue.
+                    servo_state.canard.memory_free( &servo_state.canard, canardTxPop( que, tqi ) );
+                    tqi = canardTxPeek( que );
                 }
-                else
-                {
-                    printf( "Dropping frame due to timeout\r\n" );
-                    CanErrorCallback( &servo_state.canbus[ifidx] );
-                }
-                servo_state.canard.memory_free( &servo_state.canard, canardTxPop( que, tqi ) );
-                tqi = canardTxPeek( que );
             }
+
             ProcessCanMessages( ifidx );
         }
     } while ( !g_restart_required );
@@ -2005,42 +1957,6 @@ void SystemClock_Config( void )
 }
 
 /* USER CODE BEGIN 4 */
-
-/**
- * Transmit a CAN frame using the STM32 HAL library.
- * @param hcan Pointer to a CAN_HandleTypeDef structure that contains
- *             the configuration information for the specified CAN.
- * @param frame Pointer to a CanardFrame structure that contains the CAN frame to send.
- * @return HAL status.
- */
-HAL_StatusTypeDef hal_can_transmit( CAN_HandleTypeDef* hcan, const CanardFrame* frame )
-{
-    CAN_TxHeaderTypeDef tx_header;
-    uint32_t tx_mailbox;
-    uint8_t tx_data[8];
-
-    // Setup CAN header based on whether an extended CAN ID is used
-    if ( frame->extended_can_id > 0x7FF )
-    {
-        tx_header.IDE = CAN_ID_EXT;
-        tx_header.ExtId = frame->extended_can_id;
-    }
-    else
-    {
-        tx_header.IDE = CAN_ID_STD;
-        tx_header.StdId = frame->extended_can_id & 0x7FF;
-    }
-
-    // Configure other parameters
-    tx_header.RTR = CAN_RTR_DATA;
-    tx_header.DLC = frame->payload_size;
-    tx_header.TransmitGlobalTime = DISABLE;
-
-    // Copy the payload to the transmission buffer
-    memcpy( tx_data, frame->payload, frame->payload_size );
-
-    return HAL_CAN_AddTxMessage( hcan, &tx_header, tx_data, &tx_mailbox );
-}
 
 /* USER CODE END 4 */
 

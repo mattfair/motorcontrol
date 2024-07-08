@@ -109,12 +109,14 @@ FlashStatus flash_read( void* data, uint32_t address, size_t* size, DeSerializeF
         uint8_t* source = (void*)address;
         deserialize( data, source, size);
 
+        /*
         printf("read from flash: address: %08x, size: %d, data:", (uint32_t)address, *size);
         for( size_t i = 0; i < *size; i++ )
         {
             printf( "%02x ", source[i] );
         }
         printf("\r\n");
+        */
     }
     else
     {
@@ -132,16 +134,16 @@ FlashStatus flash_write( void* data, uint32_t address, size_t size )
     }
 
     const uint8_t* data_ptr = (const uint8_t*)data;
-    printf("write to flash: address: %08x, size: %d, data:", address, size);
+    //printf("write to flash: address: %08x, size: %d, data:", address, size);
     for ( size_t i = 0; i < size; i++ )
     {
-        printf( "%02x ", data_ptr[i] );
+        //printf( "%02x ", data_ptr[i] );
         if ( HAL_FLASH_Program( FLASH_TYPEPROGRAM_BYTE, address + i, data_ptr[i] ) != HAL_OK )
         {
             return FLASH_ERROR;
         }
     }
 
-    printf("\r\n");
+    //printf("\r\n");
     return FLASH_OK;
 }
