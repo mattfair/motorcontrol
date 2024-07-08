@@ -68,6 +68,7 @@ list(APPEND HEADER_FILES ${STM32_DRIVER_HEADER_FILES})
 # Initialize an empty list to hold include directories
 set(INCLUDE_DIRS
   ${CMAKE_SOURCE_DIR}/submodules/o1heap/o1heap
+  ${CMAKE_SOURCE_DIR}/submodules/bxcan/src/
 )
 
 # Extract directory paths from each header file
@@ -231,6 +232,24 @@ add_definitions(
         -DNODE_NAME="com.mattfair.udral.servo"
 )
 
+################### Submodule libraries ################################
+add_library(o1heap 
+  "${CMAKE_SOURCE_DIR}/submodules/o1heap/o1heap/o1heap.c"
+)
+target_include_directories(o1heap PRIVATE 
+  ${CMAKE_SOURCE_DIR}/submodules/o1heap/o1heap
+)
+
+add_library(bxcan 
+  "${CMAKE_SOURCE_DIR}/submodules/bxcan/src/bxcan.c"
+)
+target_include_directories(bxcan PRIVATE 
+  ${CMAKE_SOURCE_DIR}/submodules/bxcan/src/
+)
+target_compile_definitions(bxcan PRIVATE
+  -DBXCAN_MAX_IFACE_INDEX=1
+)
+
 ################## PROJECT SETUP ######################################
 project(${PROJECT_NAME})
 
@@ -250,13 +269,6 @@ target_compile_options(io PRIVATE
   -Wno-error=missing-declarations
   -Wno-error=unused-variable
   -Wno-error=unused-parameter
-)
-
-add_library(o1heap 
-  "${CMAKE_SOURCE_DIR}/submodules/o1heap/o1heap/o1heap.c"
-)
-target_include_directories(o1heap PRIVATE 
-  ${CMAKE_SOURCE_DIR}/submodules/o1heap/o1heap
 )
 
 if(BUILD_TESTS)
@@ -554,7 +566,7 @@ else()
 
     set (CMAKE_EXECUTABLE_SUFFIX ".elf")
     set (CMAKE_STATIC_LIBRARY_SUFFIX ".a")
-    set (CMAKE_C_FLAGS "${MCPU} ${MFPU} ${MFLOAT_ABI} ${RUNTIME_LIBRARY} -mthumb -Wall") # -Werror")
+    set (CMAKE_C_FLAGS "${MCPU} ${MFPU} ${MFLOAT_ABI} ${RUNTIME_LIBRARY} -mthumb -Wall -u _printf_float") # -Werror")
     set (CMAKE_EXE_LINKER_FLAGS "-T${LINKER_SCRIPT} ${RUNTIME_LIBRARY_SYSCALLS} -Wl,-Map=test.map -Wl,--gc-sections -static -Wl,--start-group -lc -lm -Wl,--end-group")
     set (CMAKE_ASM_FLAGS "${CMAKE_C_FLAGS} -x assembler-with-cpp")
 
@@ -583,8 +595,10 @@ else()
 
     # arm target
     add_executable(arm_motorcontrol ${PROJECT_SOURCES} "${CMAKE_SOURCE_DIR}/src/Core/Src/main.c")
-    target_include_directories(arm_motorcontrol PRIVATE ${INCLUDE_DIRS})
-    target_link_libraries(arm_motorcontrol PRIVATE io o1heap)
+    target_include_directories(arm_motorcontrol PRIVATE 
+      ${INCLUDE_DIRS}
+    )
+    target_link_libraries(arm_motorcontrol PRIVATE io o1heap bxcan)
     set_target_properties(arm_motorcontrol PROPERTIES
         C_COMPILER arm-none-eabi-gcc
         CXX_COMPILER arm-none-eabi-g++

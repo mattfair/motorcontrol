@@ -77,46 +77,9 @@ void printError( const char* message );
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
-static HAL_StatusTypeDef hal_can_receive( CAN_HandleTypeDef* hcan )
-{
-    // Error callback should be called only if there is an error
-    CAN_Message* msg = CanRingBuffer_GetNextWriteSlot( &servo_state.can_rx_buffer[0] );
-
-    if ( msg == NULL )
-    {
-        printf( "CAN RX buffer full\r\n" );
-        CanErrorCallback( hcan );
-        Error_Handler();
-    }
-
-    memset( msg, 0, sizeof( CAN_Message ) );
-
-    HAL_StatusTypeDef result = HAL_CAN_GetRxMessage( hcan, CAN_RX_FIFO0, &msg->header, msg->payload );
-    if ( result == HAL_OK )
-    {
-        // printf( "Read %d bytes from CAN\r\n", msg->header.DLC );
-        if ( msg->header.DLC > CANARD_MTU_CAN_CLASSIC )
-        {
-            printf( "Received CAN frame with invalid DLC: %u\r\n", msg->header.DLC );
-            return HAL_ERROR;
-        }
-        CanRingBuffer_CommitWriteSlot( &servo_state.can_rx_buffer[0] );
-    }
-    else
-    {
-        // Call error callback only if there is an error
-        CanErrorCallback( hcan );
-    }
-
-    return result;
-}
-
 void HAL_CAN_RxFifo0MsgPendingCallback( CAN_HandleTypeDef* hcan )
 {
-    while( HAL_CAN_GetRxFifoFillLevel( hcan, CAN_RX_FIFO0 ) > 0 )
-    {
-        hal_can_receive( hcan );
-    }
+  (void)hcan;
 }
 /* USER CODE END 0 */
 
